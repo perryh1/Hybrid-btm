@@ -77,22 +77,24 @@ with tab1:
     
     tax_rate = (0.30 if apply_itc else 0) + (0.10 if apply_bonus else 0) + (0.10 if "10%" in li_bonus else (0.20 if "20%" in li_bonus else 0))
 
-    # --- SECTION 3: REVENUE & ROI CALCULATIONS ---
+    # --- SECTION 3: CORE CALCULATIONS ---
     total_gen = solar_cap + wind_cap
     capture_2025 = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
     
-    def get_stage_metrics(m, b, itc):
+    def get_stage_metrics(m, b, itc_r):
         ma = (capture_2025 * 8760 * m * (breakeven - 12))
         ba = (0.005 * 8760 * b * 1200)
         base = (solar_cap * 82500 + wind_cap * 124000)
-        m_cap = ((m * 1000000) / m_eff) * m_cost
+        # Capex calculation
+        m_th = (m * 1000000) / m_eff
+        m_cap = m_th * m_cost
         b_cap = b * BATT_COST_PER_MW
-        net_cap = m_cap + (b_cap * (1 - itc))
+        net_cap = m_cap + (b_cap * (1 - itc_r))
         irr = (ma + ba) / net_cap * 100 if net_cap > 0 else 0
         roi = net_cap / (ma + ba) if (ma + ba) > 0 else 0
-        return ma, ba, base, net_cap, irr, roi
+        return ma, ba, base, net_cap, irr, roi, m_th, m_cap, b_cap
 
-    # Data for the three stages
+    # Stages Data
     s1_m, s1_b = miner_mw, batt_mw
     s2_m, s2_b = int(total_gen * 0.20), int(total_gen * 0.30)
     s3_m, s3_b = (int(total_gen * 0.15), int(total_gen * 0.55)) if tax_rate >= 0.40 else (s2_m, s2_b)
@@ -109,12 +111,22 @@ with tab1:
     met2.metric("Post-Tax ROI", f"{s3[5]:.2f} Yrs", delta="Accelerated")
     met3.metric("Post-Tax IRR", f"{s3[4]:.1f}%", delta=f"+{s3[4]-s1[4]:.1f}%")
 
+    with st.expander("🔍 View Calculation Methodology"):
+        st.write("**How we calculate your IRR:**")
+        st.markdown(f"""
+        1. **Total Compute Power:** Based on **{miner_mw}MW** at **{m_eff} J/TH**, your fleet produces **{s1[6]:,.0f} TH** of compute.
+        2. **Mining Revenue:** We use 2025 Trend data showing favorable prices **{(capture_2025*100):.1f}%** of the year. 
+        3. **Battery Alpha:** We capture the top **0.5%** of ERCOT price spikes at an average realized value of **$1,200/MWh**.
+        4. **Capex Split:** Current setup consists of **${s1[7]:,.0f}** in Miners and **${s1[8]:,.0f}** in Battery (Pre-Tax).
+        5. **The Formula:** (Annual Alpha / Net Capex) = **{s3[4]:.1f}% IRR** (Post-Tax Strategy).
+        """)
+
     # --- SECTION 5: THREE-STAGE BREAKDOWN ---
     st.markdown("---")
     st.subheader("📋 Historical Performance Evolution")
 
-    def draw_stage(label, m_mw, b_mw, metrics, subtitle):
-        ma, ba, base, cap, irr, roi = metrics
+    def draw_stage(label, metrics, subtitle):
+        ma, ba, base, cap, irr, roi, m_th, m_cap, b_cap = metrics
         st.write(f"### {label}")
         st.caption(subtitle)
         total = ma + ba + base
@@ -127,10 +139,11 @@ with tab1:
         st.write("---")
 
     col_a, col_b, col_c = st.columns(3)
-    with col_a: draw_stage("1. Pre-Optimization", s1_m, s1_b, s1, f"Current: {s1_m}MW / {s1_b}MW")
-    with col_b: draw_stage("2. Post-Optimization", s2_m, s2_b, s2, f"Ideal Mix: {s2_m}MW / {s2_b}MW")
-    with col_c: draw_stage("3. Post-Tax Credits", s3_m, s3_b, s3, f"Tax Pivot: {s3_m}MW / {s3_b}MW")
+    with col_a: draw_stage("1. Pre-Optimization", s1, f"Current: {s1_m}MW / {s1_b}MW")
+    with col_b: draw_stage("2. Post-Optimization", s2, f"Ideal Mix: {s2_m}MW / {s2_b}MW")
+    with col_c: draw_stage("3. Post-Tax Credits", s3, f"Tax Pivot: {s3_m}MW / {s3_b}MW")
 
 with tab2:
     st.subheader("📉 3-Year Price Frequency Dataset")
-    st.table(pd.DataFrame(TREND_DATA).T.style.format("{:.1%}"))
+    df_trend = pd.DataFrame(TREND_DATA).T
+    st.table(df_trend.style.format("{:.1%}"))
