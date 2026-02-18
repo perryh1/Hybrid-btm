@@ -10,11 +10,10 @@ from datetime import datetime, timedelta
 DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 
-# Tesla Megapack Configs (Based on your screenshots)
-MEGAPACK_OPTIONS = {
-    "2hr (115.6 MW / 231.3 MWh)": {"capex": 56395570, "maint": 315300, "mw": 115.6},
-    "4hr (58.7 MW / 235 MWh)": {"capex": 52677640, "maint": 315300, "mw": 58.7}
-}
+# Tesla Megapack Configs (Converted to Per MW for the Calculator)
+# 4hr Pack: $52,677,640 / 58.7 MW = ~$897,404/MW
+BATT_COST_PER_MW = 897404.0 
+BATT_MAINT_PER_MW = 5371.0 # $315,300 / 58.7 MW
 
 # --- 3-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
 TREND_DATA = {
@@ -76,47 +75,59 @@ with tab1:
         m_cost = st.slider("Miner Cost ($/TH)", 1.0, 50.0, 15.0)
         m_eff = st.slider("Efficiency (J/TH)", 10.0, 35.0, 19.0, 0.5)
     with c3:
-        # Battery Selection
-        batt_choice = st.selectbox("Tesla Megapack Configuration", list(MEGAPACK_OPTIONS.keys()))
-        batt_mw = MEGAPACK_OPTIONS[batt_choice]["mw"]
-        batt_capex = MEGAPACK_OPTIONS[batt_choice]["capex"]
-        
+        batt_mw = st.number_input("Battery Size (MW)", value=60)
         hp_cents = st.slider("Hashprice (¢/TH)", 1.0, 10.0, 4.0, 0.1)
         breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
         st.metric("Breakeven Floor", f"${breakeven:.2f}/MWh")
 
-    # --- SECTION 2: ASSET ROI & IRR ANALYSIS ---
+    # --- SECTION 2: HYBRID OPTIMIZATION ENGINE ---
+    st.markdown("---")
+    st.subheader("🎯 Hybrid Optimization Engine")
+    
+    # Mathematical "Sweet Spot" Logic
+    total_gen = solar_cap + wind_cap
+    ideal_m = int(total_gen * 0.20)
+    ideal_b = int(total_gen * 0.30)
+    
+    # Revenue Calculation Logic
+    capture_2025 = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
+    
+    def get_ann_val(m, b):
+        m_val = (capture_2025 * 8760 * m * (breakeven - 12))
+        b_val = (0.005 * 8760 * b * 1200) - (b * BATT_MAINT_PER_MW)
+        return m_val + b_val
+
+    curr_val = get_ann_val(miner_mw, batt_mw)
+    ideal_val = get_ann_val(ideal_m, ideal_b)
+    
+    oc1, oc2 = st.columns(2)
+    with oc1:
+        st.write(f"**Ideal Sizing for {total_gen}MW Site:**")
+        st.info(f"⛏️ {ideal_m}MW Miners | 🔋 {ideal_b}MW Battery")
+        st.metric("Annual Optimization Delta", f"${(ideal_val - curr_val):,.0f}", 
+                  delta=f"{((ideal_val-curr_val)/curr_val)*100:.1f}% Upside" if curr_val > 0 else "N/A")
+    with oc2:
+        fig_opt = go.Figure(data=[
+            go.Bar(name='Current Setup', x=['Annual Alpha'], y=[curr_val], marker_color='#6c757d'),
+            go.Bar(name='Optimized Setup', x=['Annual Alpha'], y=[ideal_val], marker_color='#28a745')
+        ])
+        fig_trend = fig_opt.update_layout(height=200, template="plotly_dark", margin=dict(l=0,r=0,t=0,b=0))
+        st.plotly_chart(fig_opt, use_container_width=True)
+
+    # --- SECTION 3: ASSET ROI & IRR ANALYSIS ---
     st.markdown("---")
     st.subheader("💰 Asset ROI & IRR Analysis")
-
-    miner_th = (miner_mw * 1000000) / m_eff
-    miner_capex = miner_th * m_cost
-    total_project_capex = miner_capex + batt_capex
-
-    # 1Y Alpha based on 2025 Trend Data
-    capture_rate = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
-    mining_alpha_total = (capture_rate * 8760 * miner_mw * (breakeven - 12))
-    battery_alpha_total = (0.005 * 8760 * batt_mw * 1200) 
-    ann_alpha = mining_alpha_total + battery_alpha_total
-
-    roi_years = total_project_capex / ann_alpha if ann_alpha > 0 else 0
-    irr_est = (ann_alpha / total_project_capex) * 100 if total_project_capex > 0 else 0
+    miner_capex = ((miner_mw * 1000000) / m_eff) * m_cost
+    batt_capex = batt_mw * BATT_COST_PER_MW
+    total_capex = miner_capex + batt_capex
+    irr_est = (curr_val / total_capex) * 100 if total_capex > 0 else 0
 
     rc1, rc2, rc3 = st.columns(3)
-    rc1.metric("Total Project Capex", f"${total_project_capex:,.0f}", help=f"Miners: ${miner_capex:,.0f} | Battery: ${batt_capex:,.0f}")
-    rc2.metric("ROI (Years)", f"{roi_years:.2f} Yrs")
+    rc1.metric("Total Project Capex", f"${total_capex:,.0f}")
+    rc2.metric("ROI (Years)", f"{(total_capex / curr_val if curr_val > 0 else 0):.2f} Yrs")
     rc3.metric("Est. IRR", f"{irr_est:.1f}%")
 
-    with st.expander("🔍 View Calculation Methodology"):
-        st.markdown(f"""
-        1. **Miner Capex:** Based on **{miner_mw}MW** at **{m_eff} J/TH**, costing **${miner_capex:,.0f}**.
-        2. **Battery Capex:** Tesla Megapack **{batt_choice}** at **${batt_capex:,.0f}**.
-        3. **Total Investment:** **${total_project_capex:,.0f}**.
-        4. **Mining Alpha:** Prices favorable **{(capture_rate*100):.1f}%** of year.
-        5. **Battery Alpha:** Capturing top **0.5%** scarcity events at **$1,200/MWh**.
-        """)
-
-    # --- SECTION 3: PERFORMANCE BREAKDOWN ---
+    # --- SECTION 4: PERFORMANCE BREAKDOWN ---
     st.markdown("---")
     st.subheader("📋 Historical Performance Breakdown")
 
@@ -143,20 +154,24 @@ with tab1:
 
     col_l, col_r = st.columns(2)
     t_gen_avg = (solar_cap + wind_cap) * 0.3
-
     with col_l:
         m, b, g = calc_rev(price_hist.tail(24), miner_mw, batt_mw, t_gen_avg, breakeven)
         display_stat_box_v2("Last 24 Hours", m, b, g)
         m, b, g = calc_rev(price_hist.tail(720), miner_mw, batt_mw, t_gen_avg, breakeven)
         display_stat_box_v2("Last 30 Days", m, b, g)
-    
     with col_r:
         m, b, g = calc_rev(price_hist.tail(168), miner_mw, batt_mw, t_gen_avg, breakeven)
         display_stat_box_v2("Last 7 Days", m, b, g)
-        m_y = capture_rate * 8760 * miner_mw * (breakeven - 12)
-        b_y = (0.005 * 8760 * batt_mw * 1200)
-        g_y = (solar_cap * 82500 + wind_cap * 124000)
+        m_y, b_y, g_y = calculate_trend_yield_full(2025, miner_mw, batt_mw, breakeven, solar_cap, wind_cap)
         display_stat_box_v2("Last 1 Year (Trend)", m_y, b_y, g_y)
+
+# Helper for Tab 1 Trend Box
+def calculate_trend_yield_full(year, m, b, be, s, w):
+    stats = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
+    ma = (stats * 8760 * m * (be - 12))
+    ba = (0.005 * 8760 * b * 1200) - (b * BATT_MAINT_PER_MW)
+    base = (s * 82500 + w * 124000)
+    return ma, ba, base
 
 with tab2:
     st.subheader("📉 3-Year Price Frequency Dataset (ERCOT HB_WEST)")
