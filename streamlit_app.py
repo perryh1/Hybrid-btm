@@ -91,7 +91,7 @@ current_price = price_hist.iloc[-1]
 # --- TABBED INTERFACE ---
 tab1, tab2 = st.tabs(["📊 Live Ops & ROI (V1)", "📈 Live Spike Analysis (V2)"])
 
-# --- TAB 1: ORIGINAL V1 DASHBOARD (ZERO ALTERATIONS) ---
+# --- TAB 1: ORIGINAL V1 DASHBOARD ---
 with tab1:
     st.subheader("Midland Asset Dashboard")
     c1, c2, c3 = st.columns(3)
@@ -108,7 +108,6 @@ with tab1:
         breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
         st.metric("Breakeven Floor", f"${breakeven:.2f}/MWh")
 
-    # Capex & ROI
     st.markdown("---")
     st.subheader("💰 Miner Capex & ROI Analysis")
     total_th = (miner_mw * 1000000) / m_eff
@@ -122,7 +121,6 @@ with tab1:
     rc3.metric("ROI (Years)", f"{roi_years:.2f} Yrs")
     rc4.metric("Est. IRR", f"{irr_est:.1f}%")
 
-    # Live Power Flow
     st.markdown("---")
     st.subheader("📊 Live Power & Performance")
     s_gen = min(solar_cap * (ghi / 1000.0) * 0.85, solar_cap)
@@ -140,7 +138,6 @@ with tab1:
     p3.metric("Mining Alpha", f"${m_alpha:,.2f}/hr")
     p4.metric("Battery Alpha", f"${b_alpha:,.2f}/hr")
 
-    # Historical Performance Boxes (Exactly as V1)
     st.markdown("---")
     st.subheader("📅 Historical Performance (Cumulative Alpha)")
     def calc_box_stats(p_series, m_mw, b_mw, gen_mw):
@@ -174,15 +171,16 @@ with tab1:
         st.write("**Last 1 Year (Static)**")
         st.metric("Total Rev", f"${(BASE_REVENUE['1y_grid_solar'] + ann_alpha):,.0f}")
 
-# --- TAB 2: LIVE SPIKE ANALYSIS (V2) ---
+# --- TAB 2: LIVE SPIKE ANALYSIS (NEW THRESHOLD) ---
 with tab2:
     st.subheader("📈 180-Day Live Spike Analysis")
-    st.markdown("Performance based on **raw market segments** and real grid scarcity hours.")
+    st.markdown("Performance based on **raw market segments** and real grid scarcity hours ($250+ threshold).")
     
     ma180, ba180, g180, scarcity = 0, 0, 0, 0
     for p in price_hist:
         g180 += (t_gen_avg * p)
-        if p > 500: scarcity += 1
+        # THRESHOLD UPDATE: $250/MWh
+        if p > 250: scarcity += 1
         if p < breakeven:
             ma180 += miner_mw * (breakeven - max(0, p))
             if p < 0: ba180 += batt_mw * abs(p)
@@ -191,10 +189,11 @@ with tab2:
     s1, s2, s3 = st.columns(3)
     s1.metric("180-Day Live Revenue", f"${(ma180+ba180+g180):,.0f}")
     s2.metric("Total Hybrid Alpha", f"${(ma180+ba180):,.0f}")
-    s3.metric("Scarcity Detected", f"{scarcity} Hours", help="Hours where grid prices exceeded $500/MWh")
+    s3.metric("Scarcity Detected ($250+)", f"{scarcity} Segments", help="5-minute segments where grid prices exceeded $250/MWh")
     
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=price_hist.index, y=price_hist.values, name="Price", line=dict(color='#00FFCC')))
-    fig.add_hline(y=breakeven, line_dash="dash", line_color="red", annotation_text="Breakeven Floor")
-    fig.update_layout(height=400, template="plotly_dark", title="Midland Hub 180-Day Volatility")
+    fig.add_hline(y=250, line_dash="dash", line_color="orange", annotation_text="Scarcity Threshold ($250)")
+    fig.add_hline(y=breakeven, line_dash="dot", line_color="red", annotation_text="Breakeven Floor")
+    fig.update_layout(height=400, template="plotly_dark", title="Midland Hub 180-Day Volatility Tracking")
     st.plotly_chart(fig, use_container_width=True)
