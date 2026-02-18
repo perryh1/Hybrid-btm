@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 
-# Tesla Megapack 4hr Configuration (From User Data)
+# Tesla Megapack 4hr Config
 BATT_COST_PER_MW = 897404.0 
 BATT_MAINT_PER_MW = 5371.0 
 
@@ -61,7 +61,7 @@ current_price = price_hist.iloc[-1]
 tab1, tab2 = st.tabs(["📊 Asset Dashboard", "📈 Long-Term Volatility"])
 
 with tab1:
-    # --- SECTION 1: CONFIGURATION ---
+    # --- CONFIGURATION ---
     st.markdown("### ⚙️ System Configuration")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -77,51 +77,67 @@ with tab1:
         breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
         st.metric("Breakeven Floor", f"${breakeven:.2f}/MWh")
 
-    # --- SECTION 2: ASSET ROI & CAPEX SPLIT ---
+    # --- TAX BREAK SELECTION ---
     st.markdown("---")
-    st.subheader("💰 Asset ROI & Capex Split")
+    st.subheader("🏛️ Commercial Tax Strategy (U.S. Federal)")
+    tx1, tx2, tx3 = st.columns(3)
+    apply_itc = tx1.checkbox("Apply 30% Base ITC", value=False)
+    apply_bonus = tx2.checkbox("Apply 10% Domestic Content Bonus", value=False)
+    apply_deprec = tx3.checkbox("Apply 5-Year MACRS Depreciation", value=False)
     
-    miner_capex = ((miner_mw * 1000000) / m_eff) * m_cost
-    batt_capex = batt_mw * BATT_COST_PER_MW
-    total_capex = miner_capex + batt_capex
+    # Calculate Total Tax Benefit
+    itc_rate = (0.30 if apply_itc else 0) + (0.10 if apply_bonus else 0)
+    deprec_benefit = 0.21 * 0.80 if apply_deprec else 0 # 21% Corp Tax * 80% basis reduction factor
+
+    # --- SECTION 2: ROI ANALYSIS (BEFORE vs AFTER) ---
+    st.markdown("---")
+    st.subheader("💰 Financial Performance Comparison")
     
+    # Base Capex
+    m_capex = ((miner_mw * 1000000) / m_eff) * m_cost
+    b_capex = batt_mw * BATT_COST_PER_MW
+    total_capex_gross = m_capex + b_capex
+    
+    # Net Capex (After Tax)
+    # ITC applies primarily to Battery Storage in standalone or hybrid config
+    tax_savings = (b_capex * itc_rate) + (total_capex_gross * deprec_benefit)
+    total_capex_net = total_capex_gross - tax_savings
+    
+    # Revenue (2025 Trend Projection)
     capture_2025 = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
     ann_alpha = (capture_2025 * 8760 * miner_mw * (breakeven - 12)) + (0.005 * 8760 * batt_mw * 1200)
     
-    rc1, rc2, rc3 = st.columns(3)
-    rc1.metric("Total Capex", f"${total_capex:,.0f}")
-    rc2.metric("ROI (Years)", f"{(total_capex / ann_alpha if ann_alpha > 0 else 0):.2f} Yrs")
-    rc3.metric("Est. IRR", f"{(ann_alpha / total_capex * 100 if total_capex > 0 else 0):.1f}%")
+    col_pre, col_post = st.columns(2)
+    with col_pre:
+        st.write("**Pre-Tax Basis**")
+        st.metric("Gross Capex", f"${total_capex_gross:,.0f}")
+        st.metric("Pre-Tax ROI", f"{(total_capex_gross / ann_alpha if ann_alpha > 0 else 0):.2f} Yrs")
+        st.metric("Pre-Tax IRR", f"{(ann_alpha / total_capex_gross * 100 if total_capex_gross > 0 else 0):.1f}%")
+        
+    with col_post:
+        st.write("**Post-Tax Strategic Basis**")
+        st.metric("Net Capex", f"${total_capex_net:,.0f}", delta=f"-${tax_savings:,.0f} Benefits")
+        st.metric("Post-Tax ROI", f"{(total_capex_net / ann_alpha if ann_alpha > 0 else 0):.2f} Yrs", delta="Accelerated")
+        st.metric("Post-Tax IRR", f"{(ann_alpha / total_capex_net * 100 if total_capex_net > 0 else 0):.1f}%", delta=f"+{(ann_alpha / total_capex_net * 100) - (ann_alpha / total_capex_gross * 100):.1f}%")
 
-    # Capex Split Visualization
-    s1, s2 = st.columns([1, 2])
-    with s1:
-        st.write("**Capex Breakdown**")
-        st.write(f"⛏️ Miners: `${miner_capex:,.0f}`")
-        st.write(f"🔋 Battery: `${batt_capex:,.0f}`")
-    with s2:
-        fig_capex = go.Figure(data=[go.Pie(labels=['Miners', 'Battery'], values=[miner_capex, batt_capex], hole=.4, marker_colors=['#00FFCC', '#6c757d'])])
-        fig_capex.update_layout(height=180, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark")
-        st.plotly_chart(fig_capex, use_container_width=True)
-
-    # --- SECTION 3: HYBRID OPTIMIZATION ENGINE ---
+    # --- RATIO OPTIMIZATION TREND ---
     st.markdown("---")
-    st.subheader("🎯 Hybrid Optimization Engine")
+    st.subheader("🎯 Optimization Shift")
     total_gen = solar_cap + wind_cap
-    ideal_m, ideal_b = int(total_gen * 0.20), int(total_gen * 0.30)
-    curr_rev = (capture_2025 * 8760 * miner_mw * (breakeven - 12)) + (0.005 * 8760 * batt_mw * 1200)
-    ideal_rev = (capture_2025 * 8760 * ideal_m * (breakeven - 12)) + (0.005 * 8760 * ideal_b * 1200)
     
-    oc1, oc2 = st.columns(2)
-    with oc1:
-        st.info(f"**Ideal Mix:** {ideal_m}MW Miners | {ideal_b}MW Battery")
-        st.metric("Annual Delta", f"${(ideal_rev - curr_rev):,.0f}")
-    with oc2:
-        fig_opt = go.Figure(data=[go.Bar(name='Current', x=['Alpha'], y=[curr_rev]), go.Bar(name='Ideal', x=['Alpha'], y=[ideal_rev])])
-        fig_opt.update_layout(height=150, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark")
-        st.plotly_chart(fig_opt, use_container_width=True)
+    # Pre-Tax Ideal Ratio (Historical 20/30 split)
+    pre_m, pre_b = int(total_gen * 0.20), int(total_gen * 0.30)
+    # Post-Tax Ideal (Tax credits make battery more attractive, shifting ratio)
+    post_m, post_b = int(total_gen * 0.18), int(total_gen * 0.45) if itc_rate > 0 else (pre_m, pre_b)
+    
+    o1, o2 = st.columns(2)
+    o1.write("**Pre-Tax Ideal Ratio**")
+    o1.code(f"Miners: {pre_m}MW | Battery: {pre_b}MW")
+    o2.write("**Post-Tax Ideal Ratio**")
+    o2.code(f"Miners: {post_m}MW | Battery: {post_b}MW")
+    st.caption("Applying the 30%+ ITC incentivizes higher energy storage capacity to maximize Scarcity Alpha capture at a lower net cost.")
 
-    # --- SECTION 4: PERFORMANCE BREAKDOWN ---
+    # --- PERFORMANCE BREAKDOWN ---
     st.markdown("---")
     st.subheader("📋 Historical Performance Breakdown")
     def display_stat_box_v2(label, ma, ba, base):
