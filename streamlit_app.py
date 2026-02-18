@@ -10,10 +10,9 @@ from datetime import datetime, timedelta
 DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 
-# Tesla Megapack Configs (Converted to Per MW for the Calculator)
-# 4hr Pack: $52,677,640 / 58.7 MW = ~$897,404/MW
+# Tesla Megapack 4hr Configuration (From User Data)
 BATT_COST_PER_MW = 897404.0 
-BATT_MAINT_PER_MW = 5371.0 # $315,300 / 58.7 MW
+BATT_MAINT_PER_MW = 5371.0 
 
 # --- 3-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
 TREND_DATA = {
@@ -44,7 +43,7 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- SHARED DATA ENGINE ---
+# --- DATA ENGINE ---
 @st.cache_data(ttl=300)
 def get_site_data():
     try:
@@ -52,10 +51,8 @@ def get_site_data():
         end = pd.Timestamp.now(tz="US/Central")
         start = end - pd.Timedelta(days=31)
         df_price = iso.get_rtm_lmp(start=start, end=end, verbose=False)
-        price_hist = df_price[df_price['Location'] == 'HB_WEST'].set_index('Time').sort_index()['LMP']
-        return price_hist
-    except:
-        return pd.Series(np.random.uniform(15, 45, 744))
+        return df_price[df_price['Location'] == 'HB_WEST'].set_index('Time').sort_index()['LMP']
+    except: return pd.Series(np.random.uniform(15, 45, 744))
 
 price_hist = get_site_data()
 current_price = price_hist.iloc[-1]
@@ -80,57 +77,53 @@ with tab1:
         breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
         st.metric("Breakeven Floor", f"${breakeven:.2f}/MWh")
 
-    # --- SECTION 2: HYBRID OPTIMIZATION ENGINE ---
+    # --- SECTION 2: ASSET ROI & CAPEX SPLIT ---
     st.markdown("---")
-    st.subheader("🎯 Hybrid Optimization Engine")
+    st.subheader("💰 Asset ROI & Capex Split")
     
-    # Mathematical "Sweet Spot" Logic
-    total_gen = solar_cap + wind_cap
-    ideal_m = int(total_gen * 0.20)
-    ideal_b = int(total_gen * 0.30)
-    
-    # Revenue Calculation Logic
-    capture_2025 = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
-    
-    def get_ann_val(m, b):
-        m_val = (capture_2025 * 8760 * m * (breakeven - 12))
-        b_val = (0.005 * 8760 * b * 1200) - (b * BATT_MAINT_PER_MW)
-        return m_val + b_val
-
-    curr_val = get_ann_val(miner_mw, batt_mw)
-    ideal_val = get_ann_val(ideal_m, ideal_b)
-    
-    oc1, oc2 = st.columns(2)
-    with oc1:
-        st.write(f"**Ideal Sizing for {total_gen}MW Site:**")
-        st.info(f"⛏️ {ideal_m}MW Miners | 🔋 {ideal_b}MW Battery")
-        st.metric("Annual Optimization Delta", f"${(ideal_val - curr_val):,.0f}", 
-                  delta=f"{((ideal_val-curr_val)/curr_val)*100:.1f}% Upside" if curr_val > 0 else "N/A")
-    with oc2:
-        fig_opt = go.Figure(data=[
-            go.Bar(name='Current Setup', x=['Annual Alpha'], y=[curr_val], marker_color='#6c757d'),
-            go.Bar(name='Optimized Setup', x=['Annual Alpha'], y=[ideal_val], marker_color='#28a745')
-        ])
-        fig_trend = fig_opt.update_layout(height=200, template="plotly_dark", margin=dict(l=0,r=0,t=0,b=0))
-        st.plotly_chart(fig_opt, use_container_width=True)
-
-    # --- SECTION 3: ASSET ROI & IRR ANALYSIS ---
-    st.markdown("---")
-    st.subheader("💰 Asset ROI & IRR Analysis")
     miner_capex = ((miner_mw * 1000000) / m_eff) * m_cost
     batt_capex = batt_mw * BATT_COST_PER_MW
     total_capex = miner_capex + batt_capex
-    irr_est = (curr_val / total_capex) * 100 if total_capex > 0 else 0
-
+    
+    capture_2025 = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
+    ann_alpha = (capture_2025 * 8760 * miner_mw * (breakeven - 12)) + (0.005 * 8760 * batt_mw * 1200)
+    
     rc1, rc2, rc3 = st.columns(3)
-    rc1.metric("Total Project Capex", f"${total_capex:,.0f}")
-    rc2.metric("ROI (Years)", f"{(total_capex / curr_val if curr_val > 0 else 0):.2f} Yrs")
-    rc3.metric("Est. IRR", f"{irr_est:.1f}%")
+    rc1.metric("Total Capex", f"${total_capex:,.0f}")
+    rc2.metric("ROI (Years)", f"{(total_capex / ann_alpha if ann_alpha > 0 else 0):.2f} Yrs")
+    rc3.metric("Est. IRR", f"{(ann_alpha / total_capex * 100 if total_capex > 0 else 0):.1f}%")
+
+    # Capex Split Visualization
+    s1, s2 = st.columns([1, 2])
+    with s1:
+        st.write("**Capex Breakdown**")
+        st.write(f"⛏️ Miners: `${miner_capex:,.0f}`")
+        st.write(f"🔋 Battery: `${batt_capex:,.0f}`")
+    with s2:
+        fig_capex = go.Figure(data=[go.Pie(labels=['Miners', 'Battery'], values=[miner_capex, batt_capex], hole=.4, marker_colors=['#00FFCC', '#6c757d'])])
+        fig_capex.update_layout(height=180, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark")
+        st.plotly_chart(fig_capex, use_container_width=True)
+
+    # --- SECTION 3: HYBRID OPTIMIZATION ENGINE ---
+    st.markdown("---")
+    st.subheader("🎯 Hybrid Optimization Engine")
+    total_gen = solar_cap + wind_cap
+    ideal_m, ideal_b = int(total_gen * 0.20), int(total_gen * 0.30)
+    curr_rev = (capture_2025 * 8760 * miner_mw * (breakeven - 12)) + (0.005 * 8760 * batt_mw * 1200)
+    ideal_rev = (capture_2025 * 8760 * ideal_m * (breakeven - 12)) + (0.005 * 8760 * ideal_b * 1200)
+    
+    oc1, oc2 = st.columns(2)
+    with oc1:
+        st.info(f"**Ideal Mix:** {ideal_m}MW Miners | {ideal_b}MW Battery")
+        st.metric("Annual Delta", f"${(ideal_rev - curr_rev):,.0f}")
+    with oc2:
+        fig_opt = go.Figure(data=[go.Bar(name='Current', x=['Alpha'], y=[curr_rev]), go.Bar(name='Ideal', x=['Alpha'], y=[ideal_rev])])
+        fig_opt.update_layout(height=150, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark")
+        st.plotly_chart(fig_opt, use_container_width=True)
 
     # --- SECTION 4: PERFORMANCE BREAKDOWN ---
     st.markdown("---")
     st.subheader("📋 Historical Performance Breakdown")
-
     def display_stat_box_v2(label, ma, ba, base):
         st.write(f"### {label}")
         total = ma + ba + base
@@ -142,7 +135,7 @@ with tab1:
         st.markdown(f"**🔋 Battery Alpha:** <span style='color: #28a745;'>${ba:,.0f}</span>", unsafe_allow_html=True)
         st.write("---")
 
-    def calc_rev(p_series, m_mw, b_mw, gen_mw, be):
+    def calc_rev_live(p_series, m_mw, b_mw, gen_mw, be):
         ma, ba, base = 0, 0, 0
         for p in p_series:
             base += (gen_mw * p)
@@ -155,23 +148,18 @@ with tab1:
     col_l, col_r = st.columns(2)
     t_gen_avg = (solar_cap + wind_cap) * 0.3
     with col_l:
-        m, b, g = calc_rev(price_hist.tail(24), miner_mw, batt_mw, t_gen_avg, breakeven)
+        m, b, g = calc_rev_live(price_hist.tail(24), miner_mw, batt_mw, t_gen_avg, breakeven)
         display_stat_box_v2("Last 24 Hours", m, b, g)
-        m, b, g = calc_rev(price_hist.tail(720), miner_mw, batt_mw, t_gen_avg, breakeven)
+        m, b, g = calc_rev_live(price_hist.tail(720), miner_mw, batt_mw, t_gen_avg, breakeven)
         display_stat_box_v2("Last 30 Days", m, b, g)
     with col_r:
-        m, b, g = calc_rev(price_hist.tail(168), miner_mw, batt_mw, t_gen_avg, breakeven)
+        m, b, g = calc_rev_live(price_hist.tail(168), miner_mw, batt_mw, t_gen_avg, breakeven)
         display_stat_box_v2("Last 7 Days", m, b, g)
-        m_y, b_y, g_y = calculate_trend_yield_full(2025, miner_mw, batt_mw, breakeven, solar_cap, wind_cap)
+        # 1Y Trend
+        m_y = (capture_2025 * 8760 * miner_mw * (breakeven - 12))
+        b_y = (0.005 * 8760 * batt_mw * 1200)
+        g_y = (solar_cap * 82500 + wind_cap * 124000)
         display_stat_box_v2("Last 1 Year (Trend)", m_y, b_y, g_y)
-
-# Helper for Tab 1 Trend Box
-def calculate_trend_yield_full(year, m, b, be, s, w):
-    stats = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
-    ma = (stats * 8760 * m * (be - 12))
-    ba = (0.005 * 8760 * b * 1200) - (b * BATT_MAINT_PER_MW)
-    base = (s * 82500 + w * 124000)
-    return ma, ba, base
 
 with tab2:
     st.subheader("📉 3-Year Price Frequency Dataset (ERCOT HB_WEST)")
