@@ -11,7 +11,7 @@ DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 BATT_COST_PER_MW = 897404.0 
 
-# --- 5-YEAR HISTORICAL FREQUENCY DATASETS (RESTORED 2¢ INTERVALS) ---
+# --- 5-YEAR HISTORICAL FREQUENCY DATASET (RESTORED 2¢ INTERVALS) ---
 TREND_DATA_WEST = {
     "Negative (<$0)":    {"2021": 0.021, "2022": 0.045, "2023": 0.062, "2024": 0.094, "2025": 0.121},
     "$0 - $0.02":       {"2021": 0.182, "2022": 0.241, "2023": 0.284, "2024": 0.311, "2025": 0.335},
@@ -24,8 +24,6 @@ TREND_DATA_WEST = {
     "$0.25 - $1.00":    {"2021": 0.011, "2022": 0.009, "2023": 0.019, "2024": 0.015, "2025": 0.010},
     "$1.00 - $5.00":    {"2021": 0.008, "2022": 0.002, "2023": 0.007, "2024": 0.006, "2025": 0.005}
 }
-
-TREND_DATA_SYSTEM = TREND_DATA_WEST # Placeholder for system-wide logic alignment
 
 # --- AUTHENTICATION ---
 if "password_correct" not in st.session_state: st.session_state.password_correct = False
@@ -77,15 +75,14 @@ with tab1:
     li_choice = tx3.selectbox("Underserved Bonus", ["None", "10% Bonus", "20% Bonus"])
     t_rate += (0.1 if "10%" in li_choice else (0.2 if "20%" in li_choice else 0))
 
-    # --- DYNAMIC RATIO LOGIC (FIXED) ---
+    # --- ELASTIC BLEND ENGINE ---
     total_gen = solar_cap + wind_cap
     if total_gen > 0:
-        s_pct = solar_cap / total_gen
-        w_pct = wind_cap / total_gen
+        s_pct, w_pct = solar_cap / total_gen, wind_cap / total_gen
     else:
         s_pct, w_pct = 0.5, 0.5
 
-    # Weighted Sizing Targets: Solar (10/50) vs Wind (25/25)
+    # Interpolated Targets
     ideal_m_mw = int(total_gen * ((s_pct * 0.10) + (w_pct * 0.25)))
     ideal_b_mw = int(total_gen * ((s_pct * 0.50) + (w_pct * 0.25)))
 
@@ -93,14 +90,11 @@ with tab1:
     capture_2025 = TREND_DATA_WEST["Negative (<$0)"]["2025"] + TREND_DATA_WEST["$0 - $0.02"]["2025"]
     
     def get_stage_metrics(m, b, itc_r):
-        # Fuel-based Alpha multiplier
-        ma_factor = 1.0 + (w_pct * 0.20) # Wind helps mining
-        ba_factor = 1.0 + (s_pct * 0.25) # Solar helps battery
-        
+        ma_factor = 1.0 + (w_pct * 0.20)
+        ba_factor = 1.0 + (s_pct * 0.25)
         ma = (capture_2025 * 8760 * m * (breakeven - 12)) * ma_factor
         ba = (0.005 * 8760 * b * 1200) * ba_factor
         base = (solar_cap * 82500 + wind_cap * 124000)
-        
         m_th = (m * 1000000) / m_eff
         m_cap, b_cap = m_th * m_cost, b * BATT_COST_PER_MW
         net = m_cap + (b_cap * (1 - itc_r))
@@ -113,26 +107,18 @@ with tab1:
     s3_metrics = get_stage_metrics(miner_mw, batt_mw, t_rate)
     s4_metrics = get_stage_metrics(ideal_m_mw, ideal_b_mw, t_rate)
 
-    # --- SPLIT FINANCIAL COMPARISON ---
+    # --- FINANCIAL COMPARISON ---
     st.markdown("---")
     st.subheader("💰 Post-Tax Financial Comparison")
     cl1, cl2 = st.columns(2)
     with cl1:
         st.write("#### 1. Current Setup (Post-Tax)")
         st.caption(f"{miner_mw}MW Miners | {batt_mw}MW Battery")
-        st.metric("Post-Tax IRR", f"{s3_metrics[4]:.1f}%", delta=f"+{s3_metrics[4]-s1_metrics[4]:.1f}% vs Pre-Tax")
+        st.metric("Post-Tax IRR", f"{s3_metrics[4]:.1f}%", delta=f"+{s3_metrics[4]-s1_metrics[4]:.1f}%")
     with cl2:
         st.write("#### 2. Optimized Setup (Post-Tax)")
         st.caption(f"{ideal_m_mw}MW Miners | {ideal_b_mw}MW Battery")
         st.metric("Post-Tax IRR", f"{s4_metrics[4]:.1f}%", delta=f"+{s4_metrics[4]-s3_metrics[4]:.1f}% over Current")
-
-    # --- METHODOLOGY ---
-    with st.expander("🔍 View Calculation Methodology"):
-        st.markdown(f"""
-        1. **Dynamic Sizing Logic:** Solar generation requires higher battery storage to capture evening ramps, while Wind favors miners to capture overnight negative prices.
-        2. **Weighting Applied:** Site is **{s_pct*100:.0f}% Solar** / **{w_pct*100:.0f}% Wind**. 
-        3. **Optimized Target:** Calculated as **{ideal_m_mw}MW Miners** and **{ideal_b_mw}MW Battery**.
-        """)
 
     # --- EVOLUTION CARDS ---
     st.markdown("---")
