@@ -93,44 +93,40 @@ with tab1:
         roi = net_cap / (ma + ba) if (ma + ba) > 0 else 0
         return ma, ba, base, net_cap, irr, roi, m_th, m_cap, b_cap
 
-    # Logic for current vs optimized
     s1_m, s1_b = miner_mw, batt_mw
     s2_m, s2_b = int(total_gen * 0.20), int(total_gen * 0.30)
     
-    # Pre-Tax Base (Current)
     current_pre = get_stage_metrics(s1_m, s1_b, 0)
-    # Post-Tax (Current Setup)
     current_post = get_stage_metrics(s1_m, s1_b, tax_rate)
-    # Post-Tax (Optimized Setup)
     opt_post = get_stage_metrics(s2_m, s2_b, tax_rate)
 
-    # --- SECTION 4: SPLIT FINANCIAL COMPARISON ---
+    # --- SECTION 4: SPLIT FINANCIAL COMPARISON (WITH MW) ---
     st.markdown("---")
     st.subheader("💰 Post-Tax Financial Comparison")
     
     col_cur, col_opt = st.columns(2)
     with col_cur:
         st.write("#### 1. Current Setup (Post-Tax)")
-        st.caption(f"Config: {s1_m}MW Miners / {s1_b}MW Battery")
-        st.metric("Net Capex", f"${current_post[3]:,.0f}", delta=f"-${(s1_b * BATT_COST_PER_MW * tax_rate):,.0f}")
-        st.metric("ROI", f"{current_post[5]:.2f} Yrs")
-        st.metric("IRR", f"{current_post[4]:.1f}%", delta=f"+{current_post[4]-current_pre[4]:.1f}%")
+        st.markdown(f"**Physical Config:** `{s1_m} MW` Miners | `{s1_b} MW` Battery")
+        st.metric("Net Capex", f"${current_post[3]:,.0f}", delta=f"-${(s1_b * BATT_COST_PER_MW * tax_rate):,.0f} Benefit")
+        st.metric("Post-Tax ROI", f"{current_post[5]:.2f} Yrs")
+        st.metric("Post-Tax IRR", f"{current_post[4]:.1f}%", delta=f"+{current_post[4]-current_pre[4]:.1f}% vs Pre-Tax")
 
     with col_opt:
         st.write("#### 2. Optimized Setup (Post-Tax)")
-        st.caption(f"Config: {s2_m}MW Miners / {s2_b}MW Battery")
+        st.markdown(f"**Physical Config:** `{s2_m} MW` Miners | `{s2_b} MW` Battery")
         st.metric("Net Capex", f"${opt_post[3]:,.0f}")
-        st.metric("ROI", f"{opt_post[5]:.2f} Yrs")
-        st.metric("IRR", f"{opt_post[4]:.1f}%", delta=f"+{opt_post[4]-current_post[4]:.1f}% over Current")
+        st.metric("Post-Tax ROI", f"{opt_post[5]:.2f} Yrs")
+        st.metric("Post-Tax IRR", f"{opt_post[4]:.1f}%", delta=f"+{opt_post[4]-current_post[4]:.1f}% over Current")
 
     # --- SECTION 5: METHODOLOGY ---
     with st.expander("🔍 View Calculation Methodology"):
         st.write("**How we calculate your IRR:**")
         st.markdown(f"""
-        1. **Total Compute Power:** Based on **{miner_mw}MW** at **{m_eff} J/TH**, your current fleet produces **{current_pre[6]:,.0f} TH** of compute.
-        2. **Mining Revenue:** We use 2025 Trend data showing favorable prices **{(capture_2025*100):.1f}%** of the year. 
-        3. **Battery Alpha:** We capture the top **0.5%** of ERCOT price spikes at an average realized value of **$1,200/MWh**.
-        4. **Optimization Logic:** The 'Optimized Setup' targets a **20% Miner / 30% Battery** ratio relative to site generation to maximize hardware utilization.
+        1. **Miner Configuration:** Current fleet uses **{s1_m} MW** at **{m_eff} J/TH**, producing **{current_pre[6]:,.0f} TH** of compute.
+        2. **Battery Configuration:** Current fleet uses **{s1_b} MW** of Tesla Megapacks (4-hour duration).
+        3. **Mining Revenue:** Prices are favorable for mining **{(capture_2025*100):.1f}%** of the year (2025 Trend). 
+        4. **Optimization Logic:** The 'Optimized Setup' targets a **20% Miner / 30% Battery** ratio relative to total site generation ({total_gen} MW).
         5. **The Formula:** (Annual Alpha / Net Capex) = **Final IRR**.
         """)
 
@@ -138,10 +134,10 @@ with tab1:
     st.markdown("---")
     st.subheader("📋 Historical Performance Evolution")
     
-    def draw_stage(label, metrics, subtitle):
+    def draw_stage(label, metrics, m_val, b_val, subtitle):
         ma, ba, base, cap, irr, roi, m_th, m_cap, b_cap = metrics
         st.write(f"### {label}")
-        st.caption(subtitle)
+        st.caption(f"{subtitle} ({m_val} MW / {b_val} MW)")
         total = ma + ba + base
         st.markdown(f"<h1 style='color: #28a745; margin-bottom: 0;'>${total:,.0f}</h1>", unsafe_allow_html=True)
         st.markdown(f"<span style='color: #28a745; font-size: 1.1em;'>↑ ${ma+ba:,.0f} Alpha | {irr:.1f}% IRR</span>", unsafe_allow_html=True)
@@ -152,9 +148,9 @@ with tab1:
         st.write("---")
 
     c_a, c_b, c_c = st.columns(3)
-    with c_a: draw_stage("1. Pre-Optimization", current_pre, "Current Config / No Tax Credits")
-    with c_b: draw_stage("2. Optimized (Pre-Tax)", get_stage_metrics(s2_m, s2_b, 0), "Ideal Ratio / No Tax Credits")
-    with c_c: draw_stage("3. Optimized (Post-Tax)", opt_post, "Ideal Ratio / Full Tax Strategy")
+    with c_a: draw_stage("1. Pre-Optimization", current_pre, s1_m, s1_b, "Current Setup / No Tax")
+    with c_b: draw_stage("2. Optimized (Pre-Tax)", get_stage_metrics(s2_m, s2_b, 0), s2_m, s2_b, "Ideal Ratio / No Tax")
+    with c_c: draw_stage("3. Optimized (Post-Tax)", opt_post, s2_m, s2_b, "Ideal Ratio / Full Tax Strategy")
 
 with tab2:
     st.subheader("📉 3-Year Price Frequency Dataset")
