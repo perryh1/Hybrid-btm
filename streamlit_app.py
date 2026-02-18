@@ -11,11 +11,18 @@ DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 BATT_COST_PER_MW = 897404.0 
 
-# --- 3-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
+# --- RESTORED 3-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
+# Values represent % of total annual hours (8,760 hrs) in 2-cent segments
 TREND_DATA = {
     "Negative (<$0)":    {"2023": 0.062, "2024": 0.094, "2025": 0.121},
     "$0 - $0.02":       {"2023": 0.284, "2024": 0.311, "2025": 0.335},
     "$0.02 - $0.04":    {"2023": 0.341, "2024": 0.305, "2025": 0.272},
+    "$0.04 - $0.06":    {"2023": 0.142, "2024": 0.124, "2025": 0.110},
+    "$0.06 - $0.08":    {"2023": 0.065, "2024": 0.061, "2025": 0.058},
+    "$0.08 - $0.10":    {"2023": 0.038, "2024": 0.039, "2025": 0.040},
+    "$0.10 - $0.15":    {"2023": 0.024, "2024": 0.026, "2025": 0.028},
+    "$0.15 - $0.25":    {"2023": 0.018, "2024": 0.019, "2025": 0.021},
+    "$0.25 - $1.00":    {"2023": 0.019, "2024": 0.015, "2025": 0.010},
     "$1.00 - $5.00":    {"2023": 0.007, "2024": 0.006, "2025": 0.005}
 }
 
@@ -100,33 +107,32 @@ with tab1:
     current_post = get_stage_metrics(s1_m, s1_b, tax_rate)
     opt_post = get_stage_metrics(s2_m, s2_b, tax_rate)
 
-    # --- SECTION 4: SPLIT FINANCIAL COMPARISON (WITH MW) ---
+    # --- SECTION 4: SPLIT FINANCIAL COMPARISON ---
     st.markdown("---")
     st.subheader("💰 Post-Tax Financial Comparison")
-    
     col_cur, col_opt = st.columns(2)
     with col_cur:
         st.write("#### 1. Current Setup (Post-Tax)")
         st.markdown(f"**Physical Config:** `{s1_m} MW` Miners | `{s1_b} MW` Battery")
         st.metric("Net Capex", f"${current_post[3]:,.0f}", delta=f"-${(s1_b * BATT_COST_PER_MW * tax_rate):,.0f} Benefit")
-        st.metric("Post-Tax ROI", f"{current_post[5]:.2f} Yrs")
-        st.metric("Post-Tax IRR", f"{current_post[4]:.1f}%", delta=f"+{current_post[4]-current_pre[4]:.1f}% vs Pre-Tax")
+        st.metric("ROI", f"{current_post[5]:.2f} Yrs")
+        st.metric("IRR", f"{current_post[4]:.1f}%", delta=f"+{current_post[4]-current_pre[4]:.1f}% vs Pre-Tax")
 
     with col_opt:
         st.write("#### 2. Optimized Setup (Post-Tax)")
         st.markdown(f"**Physical Config:** `{s2_m} MW` Miners | `{s2_b} MW` Battery")
         st.metric("Net Capex", f"${opt_post[3]:,.0f}")
-        st.metric("Post-Tax ROI", f"{opt_post[5]:.2f} Yrs")
-        st.metric("Post-Tax IRR", f"{opt_post[4]:.1f}%", delta=f"+{opt_post[4]-current_post[4]:.1f}% over Current")
+        st.metric("ROI", f"{opt_post[5]:.2f} Yrs")
+        st.metric("IRR", f"{opt_post[4]:.1f}%", delta=f"+{opt_post[4]-current_post[4]:.1f}% over Current")
 
     # --- SECTION 5: METHODOLOGY ---
     with st.expander("🔍 View Calculation Methodology"):
         st.write("**How we calculate your IRR:**")
         st.markdown(f"""
-        1. **Miner Configuration:** Current fleet uses **{s1_m} MW** at **{m_eff} J/TH**, producing **{current_pre[6]:,.0f} TH** of compute.
-        2. **Battery Configuration:** Current fleet uses **{s1_b} MW** of Tesla Megapacks (4-hour duration).
-        3. **Mining Revenue:** Prices are favorable for mining **{(capture_2025*100):.1f}%** of the year (2025 Trend). 
-        4. **Optimization Logic:** The 'Optimized Setup' targets a **20% Miner / 30% Battery** ratio relative to total site generation ({total_gen} MW).
+        1. **Miner Configuration:** Fleet uses **{s1_m} MW** at **{m_eff} J/TH**, producing **{current_pre[6]:,.0f} TH**.
+        2. **Battery Configuration:** Fleet uses **{s1_b} MW** of Tesla Megapacks.
+        3. **Mining Revenue:** Prices favorable for mining **{(capture_2025*100):.1f}%** of year (2025 Trend). 
+        4. **Optimization Logic:** 'Optimized Setup' targets **20% Miner / 30% Battery** ratio to site generation ({total_gen} MW).
         5. **The Formula:** (Annual Alpha / Net Capex) = **Final IRR**.
         """)
 
@@ -154,5 +160,6 @@ with tab1:
 
 with tab2:
     st.subheader("📉 3-Year Price Frequency Dataset")
+    st.markdown("*Percentage of annual hours (8,760 hrs) per 2-cent segment (HB_WEST)*")
     df_trend = pd.DataFrame(TREND_DATA).T
-    st.table(df_trend.style.format("{:.1%}"))
+    st.table(df_trend.style.format("{:.1%}") )
