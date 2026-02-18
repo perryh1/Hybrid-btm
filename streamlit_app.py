@@ -10,9 +10,13 @@ from datetime import datetime, timedelta
 DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 
+# Tesla Megapack Configs (Based on your screenshots)
+MEGAPACK_OPTIONS = {
+    "2hr (115.6 MW / 231.3 MWh)": {"capex": 56395570, "maint": 315300, "mw": 115.6},
+    "4hr (58.7 MW / 235 MWh)": {"capex": 52677640, "maint": 315300, "mw": 58.7}
+}
+
 # --- 3-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
-# Values represent % of total annual hours (8,760 hrs)
-# Segmented in 2-cent ($20/MWh) increments
 TREND_DATA = {
     "Negative (<$0)":    {"2023": 0.062, "2024": 0.094, "2025": 0.121},
     "$0 - $0.02":       {"2023": 0.284, "2024": 0.311, "2025": 0.335},
@@ -33,13 +37,10 @@ if "password_correct" not in st.session_state:
 def check_password():
     if st.session_state.password_correct: return True
     st.title("⚡ The Hybrid Alpha Play")
-    st.subheader("Midland Asset Strategy")
     pwd = st.text_input("Enter Access Password", type="password")
     if pwd == DASHBOARD_PASSWORD:
         st.session_state.password_correct = True
         st.rerun()
-    elif pwd != "":
-        st.error("Incorrect password")
     return False
 
 if not check_password(): st.stop()
@@ -53,15 +54,11 @@ def get_site_data():
         start = end - pd.Timedelta(days=31)
         df_price = iso.get_rtm_lmp(start=start, end=end, verbose=False)
         price_hist = df_price[df_price['Location'] == 'HB_WEST'].set_index('Time').sort_index()['LMP']
-        
-        url = "https://api.open-meteo.com/v1/forecast"
-        params = {"latitude": LAT, "longitude": LONG, "current": ["shortwave_radiation", "wind_speed_10m"], "timezone": "auto"}
-        r = requests.get(url, params=params).json()
-        return price_hist, r['current']['shortwave_radiation'], r['current']['wind_speed_10m']
+        return price_hist
     except:
-        return pd.Series(np.random.uniform(15, 45, 744)), 800.0, 20.0
+        return pd.Series(np.random.uniform(15, 45, 744))
 
-price_hist, ghi, ws = get_site_data()
+price_hist = get_site_data()
 current_price = price_hist.iloc[-1]
 
 # --- APP TABS ---
@@ -72,15 +69,19 @@ with tab1:
     st.markdown("### ⚙️ System Configuration")
     c1, c2, c3 = st.columns(3)
     with c1:
-        solar_cap = st.slider("Solar Capacity (MW)", 0, 1000, 100, key="s_cap")
-        wind_cap = st.slider("Wind Capacity (MW)", 0, 1000, 100, key="w_cap")
+        solar_cap = st.slider("Solar Capacity (MW)", 0, 1000, 100)
+        wind_cap = st.slider("Wind Capacity (MW)", 0, 1000, 100)
     with c2:
         miner_mw = st.number_input("Miner Fleet (MW)", value=35)
-        batt_mw = st.number_input("Battery Size (MW)", value=60)
         m_cost = st.slider("Miner Cost ($/TH)", 1.0, 50.0, 15.0)
-    with c3:
-        hp_cents = st.slider("Hashprice (¢/TH)", 1.0, 10.0, 4.0, 0.1)
         m_eff = st.slider("Efficiency (J/TH)", 10.0, 35.0, 19.0, 0.5)
+    with c3:
+        # Battery Selection
+        batt_choice = st.selectbox("Tesla Megapack Configuration", list(MEGAPACK_OPTIONS.keys()))
+        batt_mw = MEGAPACK_OPTIONS[batt_choice]["mw"]
+        batt_capex = MEGAPACK_OPTIONS[batt_choice]["capex"]
+        
+        hp_cents = st.slider("Hashprice (¢/TH)", 1.0, 10.0, 4.0, 0.1)
         breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
         st.metric("Breakeven Floor", f"${breakeven:.2f}/MWh")
 
@@ -88,50 +89,34 @@ with tab1:
     st.markdown("---")
     st.subheader("💰 Asset ROI & IRR Analysis")
 
-    total_th = (miner_mw * 1000000) / m_eff
-    total_capex = total_th * m_cost
+    miner_th = (miner_mw * 1000000) / m_eff
+    miner_capex = miner_th * m_cost
+    total_project_capex = miner_capex + batt_capex
 
-    # 1Y Alpha based on 2025 Trend Data (% of year below breakeven)
+    # 1Y Alpha based on 2025 Trend Data
     capture_rate = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
     mining_alpha_total = (capture_rate * 8760 * miner_mw * (breakeven - 12))
-    battery_alpha_total = (0.005 * 8760 * batt_mw * 1200) # 0.5% spike capture at $1200
+    battery_alpha_total = (0.005 * 8760 * batt_mw * 1200) 
     ann_alpha = mining_alpha_total + battery_alpha_total
 
-    roi_years = total_capex / ann_alpha if ann_alpha > 0 else 0
-    irr_est = (ann_alpha / total_capex) * 100 if total_capex > 0 else 0
+    roi_years = total_project_capex / ann_alpha if ann_alpha > 0 else 0
+    irr_est = (ann_alpha / total_project_capex) * 100 if total_project_capex > 0 else 0
 
     rc1, rc2, rc3 = st.columns(3)
-    rc1.metric("Total Miner Capex", f"${total_capex:,.0f}")
+    rc1.metric("Total Project Capex", f"${total_project_capex:,.0f}", help=f"Miners: ${miner_capex:,.0f} | Battery: ${batt_capex:,.0f}")
     rc2.metric("ROI (Years)", f"{roi_years:.2f} Yrs")
     rc3.metric("Est. IRR", f"{irr_est:.1f}%")
 
     with st.expander("🔍 View Calculation Methodology"):
-        st.write("**How we calculate your IRR:**")
         st.markdown(f"""
-        1. **Total Compute Power:** Based on **{miner_mw}MW** at **{m_eff} J/TH**, your fleet produces **{total_th:,.0f} TH** of compute.
-        2. **Mining Revenue:** Based on 2025 Trend data, prices are favorable for mining **{(capture_rate*100):.1f}%** of the year. 
-        3. **Battery Alpha:** We capture the top **0.5%** of ERCOT price spikes at an average realized value of **$1,200/MWh**.
-        4. **The Formula:** (Annual Alpha / Total Capex) = **{irr_est:.1f}% IRR**.
+        1. **Miner Capex:** Based on **{miner_mw}MW** at **{m_eff} J/TH**, costing **${miner_capex:,.0f}**.
+        2. **Battery Capex:** Tesla Megapack **{batt_choice}** at **${batt_capex:,.0f}**.
+        3. **Total Investment:** **${total_project_capex:,.0f}**.
+        4. **Mining Alpha:** Prices favorable **{(capture_rate*100):.1f}%** of year.
+        5. **Battery Alpha:** Capturing top **0.5%** scarcity events at **$1,200/MWh**.
         """)
 
-    # --- SECTION 3: LIVE POWER & PERFORMANCE ---
-    st.markdown("---")
-    st.subheader("📊 Live Power & Performance")
-    s_gen = min(solar_cap * (ghi / 1000.0) * 0.85, solar_cap)
-    w_gen = 0 if (ws/3.6) < 3 else (wind_cap if (ws/3.6) >= 12 else (((ws/3.6)-3)/9)**3 * wind_cap)
-    total_gen = s_gen + w_gen
-    
-    p_grid, p1, p2, p3 = st.columns(4)
-    p_grid.metric("Grid Price", f"${current_price:.2f}/MWh")
-    p1.metric("Total Gen", f"{total_gen:.1f} MW")
-    
-    if current_price < breakeven:
-        m_load, m_alpha = min(miner_mw, total_gen), min(miner_mw, total_gen) * (breakeven - max(0, current_price))
-    else: m_load, m_alpha = 0, 0
-    p2.metric("Mining Alpha", f"${m_alpha:,.2f}/hr")
-    p3.metric("Battery Alpha", f"${(batt_mw * current_price if current_price > breakeven else 0):,.2f}/hr")
-
-    # --- SECTION 4: HISTORICAL PERFORMANCE (SCREENSHOT STYLE) ---
+    # --- SECTION 3: PERFORMANCE BREAKDOWN ---
     st.markdown("---")
     st.subheader("📋 Historical Performance Breakdown")
 
@@ -174,17 +159,6 @@ with tab1:
         display_stat_box_v2("Last 1 Year (Trend)", m_y, b_y, g_y)
 
 with tab2:
-    st.subheader("📉 West Texas Market Volatility (HB_WEST)")
-    st.write("**3-Year Price Frequency Dataset (2¢ Segments)**")
-    
-    # Table Visualization
+    st.subheader("📉 3-Year Price Frequency Dataset (ERCOT HB_WEST)")
     df_trend = pd.DataFrame(TREND_DATA).T
     st.table(df_trend.style.format("{:.1%}"))
-    
-    # Trend Chart
-    years = ["2023", "2024", "2025"]
-    neg_vals = [TREND_DATA["Negative (<$0)"][y] * 100 for y in years]
-    
-    fig = go.Figure(data=[go.Bar(name='Negative Price Hours %', x=years, y=neg_vals, marker_color='#00FFCC')])
-    fig.update_layout(title="Growth of Negative Pricing Hours (Free Fuel Window)", template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
