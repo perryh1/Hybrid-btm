@@ -15,6 +15,7 @@ BATT_COST_PER_MW = 897404.0
 TREND_DATA = {
     "Negative (<$0)":    {"2023": 0.062, "2024": 0.094, "2025": 0.121},
     "$0 - $0.02":       {"2023": 0.284, "2024": 0.311, "2025": 0.335},
+    "$0.02 - $0.04":    {"2023": 0.341, "2024": 0.305, "2025": 0.272},
     "$1.00 - $5.00":    {"2023": 0.007, "2024": 0.006, "2025": 0.005}
 }
 
@@ -46,7 +47,7 @@ def get_site_data():
 
 price_hist = get_site_data()
 
-# --- TAB 1: ASSET DASHBOARD ---
+# --- APP TABS ---
 tab1, tab2 = st.tabs(["📊 Performance Evolution", "📈 Long-Term Volatility"])
 
 with tab1:
@@ -76,50 +77,59 @@ with tab1:
     
     tax_rate = (0.30 if apply_itc else 0) + (0.10 if apply_bonus else 0) + (0.10 if "10%" in li_bonus else (0.20 if "20%" in li_bonus else 0))
 
-    # --- SECTION 3: THREE-STAGE BREAKDOWN ---
-    st.markdown("---")
-    st.subheader("📋 Historical Performance Evolution (Last 1 Year)")
-
+    # --- SECTION 3: REVENUE & ROI CALCULATIONS ---
     total_gen = solar_cap + wind_cap
     capture_2025 = TREND_DATA["Negative (<$0)"]["2025"] + TREND_DATA["$0 - $0.02"]["2025"]
     
     def get_stage_metrics(m, b, itc):
-        # Revenue
         ma = (capture_2025 * 8760 * m * (breakeven - 12))
         ba = (0.005 * 8760 * b * 1200)
         base = (solar_cap * 82500 + wind_cap * 124000)
-        # Capex
         m_cap = ((m * 1000000) / m_eff) * m_cost
         b_cap = b * BATT_COST_PER_MW
         net_cap = m_cap + (b_cap * (1 - itc))
         irr = (ma + ba) / net_cap * 100 if net_cap > 0 else 0
-        return ma, ba, base, net_cap, irr
+        roi = net_cap / (ma + ba) if (ma + ba) > 0 else 0
+        return ma, ba, base, net_cap, irr, roi
 
-    # STAGE 1: Current Inputs
-    s1_ma, s1_ba, s1_base, s1_cap, s1_irr = get_stage_metrics(miner_mw, batt_mw, 0)
-    # STAGE 2: Optimized (Pre-Tax)
+    # Data for the three stages
+    s1_m, s1_b = miner_mw, batt_mw
     s2_m, s2_b = int(total_gen * 0.20), int(total_gen * 0.30)
-    s2_ma, s2_ba, s2_base, s2_cap, s2_irr = get_stage_metrics(s2_m, s2_b, 0)
-    # STAGE 3: Post-Tax (Subsidized Ratio)
     s3_m, s3_b = (int(total_gen * 0.15), int(total_gen * 0.55)) if tax_rate >= 0.40 else (s2_m, s2_b)
-    s3_ma, s3_ba, s3_base, s3_cap, s3_irr = get_stage_metrics(s3_m, s3_b, tax_rate)
 
-    def draw_stage(label, ma, ba, base, cap, irr, subtitle):
+    s1 = get_stage_metrics(s1_m, s1_b, 0)
+    s2 = get_stage_metrics(s2_m, s2_b, 0)
+    s3 = get_stage_metrics(s3_m, s3_b, tax_rate)
+
+    # --- SECTION 4: ROI & IRR TOP-LINE COMPARISON ---
+    st.markdown("---")
+    st.subheader("💰 Financial Performance Comparison")
+    met1, met2, met3 = st.columns(3)
+    met1.metric("Total Net Capex (Post-Tax)", f"${s3[3]:,.0f}", delta=f"-${(s1_b * BATT_COST_PER_MW * tax_rate):,.0f}")
+    met2.metric("Post-Tax ROI", f"{s3[5]:.2f} Yrs", delta="Accelerated")
+    met3.metric("Post-Tax IRR", f"{s3[4]:.1f}%", delta=f"+{s3[4]-s1[4]:.1f}%")
+
+    # --- SECTION 5: THREE-STAGE BREAKDOWN ---
+    st.markdown("---")
+    st.subheader("📋 Historical Performance Evolution")
+
+    def draw_stage(label, m_mw, b_mw, metrics, subtitle):
+        ma, ba, base, cap, irr, roi = metrics
         st.write(f"### {label}")
         st.caption(subtitle)
         total = ma + ba + base
         st.markdown(f"<h1 style='color: #28a745; margin-bottom: 0;'>${total:,.0f}</h1>", unsafe_allow_html=True)
         st.markdown(f"<span style='color: #28a745; font-size: 1.1em;'>↑ ${ma+ba:,.0f} Alpha | {irr:.1f}% IRR</span>", unsafe_allow_html=True)
         st.write("")
-        st.markdown(f"* **⚡ Grid (Base):** `${base:,.0f}`")
-        st.markdown(f"* **⛏️ Mining Alpha:** `${ma:,.0f}`")
-        st.markdown(f"* **🔋 Battery Alpha:** `${ba:,.0f}`")
+        st.markdown(f"**⚡ Grid (Base):** <span style='color: #6c757d;'>${base:,.0f}</span>", unsafe_allow_html=True)
+        st.markdown(f"**⛏️ Mining Alpha:** <span style='color: #28a745;'>${ma:,.0f}</span>", unsafe_allow_html=True)
+        st.markdown(f"**🔋 Battery Alpha:** <span style='color: #28a745;'>${ba:,.0f}</span>", unsafe_allow_html=True)
         st.write("---")
 
     col_a, col_b, col_c = st.columns(3)
-    with col_a: draw_stage("1. Pre-Optimization", s1_ma, s1_ba, s1_base, s1_cap, s1_irr, f"Current: {miner_mw}MW / {batt_mw}MW")
-    with col_b: draw_stage("2. Post-Optimization", s2_ma, s2_ba, s2_base, s2_cap, s2_irr, f"Ideal Mix: {s2_m}MW / {s2_b}MW")
-    with col_c: draw_stage("3. Post-Tax Credits", s3_ma, s3_ba, s3_base, s3_cap, s3_irr, f"Tax Pivot: {s3_m}MW / {s3_b}MW")
+    with col_a: draw_stage("1. Pre-Optimization", s1_m, s1_b, s1, f"Current: {s1_m}MW / {s1_b}MW")
+    with col_b: draw_stage("2. Post-Optimization", s2_m, s2_b, s2, f"Ideal Mix: {s2_m}MW / {s2_b}MW")
+    with col_c: draw_stage("3. Post-Tax Credits", s3_m, s3_b, s3, f"Tax Pivot: {s3_m}MW / {s3_b}MW")
 
 with tab2:
     st.subheader("📉 3-Year Price Frequency Dataset")
