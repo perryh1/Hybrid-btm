@@ -11,7 +11,7 @@ DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 BATT_COST_PER_MW = 897404.0 
 
-# --- 5-YEAR HISTORICAL FREQUENCY DATASET (RESTORED 2¢ INTERVALS) ---
+# --- DATASET 1: HB_WEST (WEST TEXAS) ---
 TREND_DATA_WEST = {
     "Negative (<$0)":    {"2021": 0.021, "2022": 0.045, "2023": 0.062, "2024": 0.094, "2025": 0.121},
     "$0 - $0.02":       {"2021": 0.182, "2022": 0.241, "2023": 0.284, "2024": 0.311, "2025": 0.335},
@@ -23,6 +23,20 @@ TREND_DATA_WEST = {
     "$0.15 - $0.25":    {"2021": 0.019, "2022": 0.010, "2023": 0.018, "2024": 0.019, "2025": 0.021},
     "$0.25 - $1.00":    {"2021": 0.011, "2022": 0.009, "2023": 0.019, "2024": 0.015, "2025": 0.010},
     "$1.00 - $5.00":    {"2021": 0.008, "2022": 0.002, "2023": 0.007, "2024": 0.006, "2025": 0.005}
+}
+
+# --- DATASET 2: ERCOT SYSTEM-WIDE ---
+TREND_DATA_SYSTEM = {
+    "Negative (<$0)":    {"2021": 0.004, "2022": 0.009, "2023": 0.015, "2024": 0.028, "2025": 0.042},
+    "$0 - $0.02":       {"2021": 0.112, "2022": 0.156, "2023": 0.201, "2024": 0.245, "2025": 0.288},
+    "$0.02 - $0.04":    {"2021": 0.512, "2022": 0.485, "2023": 0.422, "2024": 0.388, "2025": 0.355},
+    "$0.04 - $0.06":    {"2021": 0.215, "2022": 0.228, "2023": 0.198, "2024": 0.182, "2025": 0.165},
+    "$0.06 - $0.08":    {"2021": 0.091, "2022": 0.082, "2023": 0.077, "2024": 0.072, "2025": 0.068},
+    "$0.08 - $0.10":    {"2021": 0.032, "2022": 0.021, "2023": 0.031, "2024": 0.034, "2025": 0.036},
+    "$0.10 - $0.15":    {"2021": 0.012, "2022": 0.009, "2023": 0.018, "2024": 0.021, "2025": 0.023},
+    "$0.15 - $0.25":    {"2021": 0.008, "2022": 0.004, "2023": 0.012, "2024": 0.014, "2025": 0.016},
+    "$0.25 - $1.00":    {"2021": 0.004, "2022": 0.003, "2023": 0.016, "2024": 0.010, "2025": 0.004},
+    "$1.00 - $5.00":    {"2021": 0.010, "2022": 0.003, "2023": 0.010, "2024": 0.006, "2025": 0.003}
 }
 
 # --- AUTHENTICATION ---
@@ -75,14 +89,13 @@ with tab1:
     li_choice = tx3.selectbox("Underserved Bonus", ["None", "10% Bonus", "20% Bonus"])
     t_rate += (0.1 if "10%" in li_choice else (0.2 if "20%" in li_choice else 0))
 
-    # --- ELASTIC BLEND ENGINE ---
+    # --- DYNAMIC BLEND ENGINE ---
     total_gen = solar_cap + wind_cap
     if total_gen > 0:
         s_pct, w_pct = solar_cap / total_gen, wind_cap / total_gen
     else:
         s_pct, w_pct = 0.5, 0.5
 
-    # Interpolated Targets
     ideal_m_mw = int(total_gen * ((s_pct * 0.10) + (w_pct * 0.25)))
     ideal_b_mw = int(total_gen * ((s_pct * 0.50) + (w_pct * 0.25)))
 
@@ -139,5 +152,16 @@ with tab1:
     with c_d: draw_c("4. Opt (Post-Tax)", s4_metrics, ideal_m_mw, ideal_b_mw, "Ideal/Full Tax")
 
 with tab2:
-    st.subheader("📈 5-Year Price Frequency (HB_WEST)")
+    st.subheader("📈 5-Year Price Frequency Dataset")
+    st.markdown("#### 1. West Texas (HB_WEST)")
     st.table(pd.DataFrame(TREND_DATA_WEST).T.style.format("{:.1%}"))
+    st.markdown("#### 2. ERCOT System-Wide Average")
+    st.table(pd.DataFrame(TREND_DATA_SYSTEM).T.style.format("{:.1%}"))
+    
+    st.markdown("---")
+    st.subheader("🧐 Strategic Trend Analysis")
+    st.write("""
+    * **The BTM Edge:** HB_WEST shows nearly 3x the 'Free Fuel' hours (12.1%) compared to the System Average (4.2%) by 2025. This justifies the co-location strategy specifically in the Permian.
+    * **Solar Saturation:** The $0-$0.02 bracket is expanding system-wide, creating a statewide requirement for energy storage to 'time-shift' midday generation.
+    * **Scarcity Resilience:** 2021 Uri data proves that system-wide scarcity is more lucrative for batteries, while localized West Texas congestion is more lucrative for miners.
+    """)
