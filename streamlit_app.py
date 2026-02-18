@@ -11,8 +11,8 @@ DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 BATT_COST_PER_MW = 897404.0 
 
-# --- 5-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
-# Values represent % of annual hours in 2-cent ($20/MWh) segments
+# --- RESTORED 5-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
+# Values represent % of total annual hours (8,760 hrs) in 2-cent ($20/MWh) segments
 TREND_DATA = {
     "Negative (<$0)":    {"2021": 0.021, "2022": 0.045, "2023": 0.062, "2024": 0.094, "2025": 0.121},
     "$0 - $0.02":       {"2021": 0.182, "2022": 0.241, "2023": 0.284, "2024": 0.311, "2025": 0.335},
@@ -116,15 +116,15 @@ with tab1:
         st.write("#### 1. Current Setup (Post-Tax)")
         st.markdown(f"**Physical Config:** `{s1_m} MW` Miners | `{s1_b} MW` Battery")
         st.metric("Net Capex", f"${current_post[3]:,.0f}", delta=f"-${(s1_b * BATT_COST_PER_MW * tax_rate):,.0f} Benefit")
-        st.metric("ROI", f"{current_post[5]:.2f} Yrs")
-        st.metric("IRR", f"{current_post[4]:.1f}%", delta=f"+{current_post[4]-current_pre[4]:.1f}% vs Pre-Tax")
+        st.metric("Post-Tax ROI", f"{current_post[5]:.2f} Yrs")
+        st.metric("Post-Tax IRR", f"{current_post[4]:.1f}%", delta=f"+{current_post[4]-current_pre[4]:.1f}% vs Pre-Tax")
 
     with col_opt:
         st.write("#### 2. Optimized Setup (Post-Tax)")
         st.markdown(f"**Physical Config:** `{s2_m} MW` Miners | `{s2_b} MW` Battery")
         st.metric("Net Capex", f"${opt_post[3]:,.0f}")
-        st.metric("ROI", f"{opt_post[5]:.2f} Yrs")
-        st.metric("IRR", f"{opt_post[4]:.1f}%", delta=f"+{opt_post[4]-current_post[4]:.1f}% over Current")
+        st.metric("Post-Tax ROI", f"{opt_post[5]:.2f} Yrs")
+        st.metric("Post-Tax IRR", f"{opt_post[4]:.1f}%", delta=f"+{opt_post[4]-current_post[4]:.1f}% over Current")
 
     # --- SECTION 5: METHODOLOGY ---
     with st.expander("🔍 View Calculation Methodology"):
@@ -132,8 +132,9 @@ with tab1:
         st.markdown(f"""
         1. **Miner Configuration:** Fleet uses **{s1_m} MW** at **{m_eff} J/TH**, producing **{current_pre[6]:,.0f} TH**.
         2. **Battery Configuration:** Fleet uses **{s1_b} MW** of Tesla Megapacks.
-        3. **5-Year Context:** Revenue projections use 2025 trend data to reflect current market saturation.
-        4. **Optimization Logic:** 'Optimized Setup' targets **20% Miner / 30% Battery** ratio to site generation ({total_gen} MW).
+        3. **5-Year Trend Data:** Projections utilize 2025 market frequency data to account for current renewable saturation.
+        4. **Optimization Logic:** 'Optimized Setup' targets a **20% Miner / 30% Battery** ratio to site generation ({total_gen} MW).
+        5. **Formula:** (Annual Alpha / Net Capex) = **Final IRR**.
         """)
 
     # --- SECTION 6: THREE-STAGE EVOLUTION ---
@@ -159,7 +160,7 @@ with tab1:
     with c_c: draw_stage("3. Optimized (Post-Tax)", opt_post, s2_m, s2_b, "Ideal Ratio / Full Tax Strategy")
 
 with tab2:
-    st.subheader("📉 5-Year Price Frequency Dataset")
+    st.subheader("📈 5-Year Price Frequency Dataset")
     st.markdown("*Percentage of annual hours (8,760 hrs) per 2-cent segment (HB_WEST)*")
     df_trend = pd.DataFrame(TREND_DATA).T
-    st.table(df_trend.style.format("{:.1%}") )
+    st.table(df_trend.style.format("{:.1%}"))
