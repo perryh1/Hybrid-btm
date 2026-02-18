@@ -25,7 +25,7 @@ TREND_DATA_WEST = {
     "$1.00 - $5.00":    {"2021": 0.008, "2022": 0.002, "2023": 0.007, "2024": 0.006, "2025": 0.005}
 }
 
-# --- DATASET 2: ERCOT SYSTEM-WIDE AVERAGE ---
+# --- DATASET 2: ERCOT SYSTEM-WIDE ---
 TREND_DATA_SYSTEM = {
     "Negative (<$0)":    {"2021": 0.004, "2022": 0.009, "2023": 0.015, "2024": 0.028, "2025": 0.042},
     "$0 - $0.02":       {"2021": 0.112, "2022": 0.156, "2023": 0.201, "2024": 0.245, "2025": 0.288},
@@ -39,7 +39,7 @@ TREND_DATA_SYSTEM = {
     "$1.00 - $5.00":    {"2021": 0.010, "2022": 0.003, "2023": 0.010, "2024": 0.006, "2025": 0.003}
 }
 
-# --- AUTHENTICATION & DATA ENGINE ---
+# --- AUTHENTICATION & ENGINE ---
 if "password_correct" not in st.session_state: st.session_state.password_correct = False
 def check_password():
     if st.session_state.password_correct: return True
@@ -80,37 +80,59 @@ with tab1:
         breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
         st.metric("Breakeven Floor", f"${breakeven:.2f}/MWh")
 
-    # --- TAX STRATEGY ---
+    # --- UPDATED TAX STRATEGY ---
     st.markdown("---")
     st.subheader("🏛️ Commercial Tax Strategy")
     tx1, tx2, tx3 = st.columns(3)
-    tax_rate = (0.3 if tx1.checkbox("Apply 30% Base ITC", True) else 0) + (0.1 if tx2.checkbox("Apply 10% Domestic Content", False) else 0)
+    # ITC Logic
+    itc_rate = (0.3 if tx1.checkbox("Apply 30% Base ITC", True) else 0) + (0.1 if tx2.checkbox("Apply 10% Domestic Content", False) else 0)
     li_choice = tx3.selectbox("Underserved Bonus", ["None", "10% Bonus", "20% Bonus"])
-    tax_rate += (0.1 if "10%" in li_choice else (0.2 if "20%" in li_choice else 0))
+    itc_rate += (0.1 if "10%" in li_choice else (0.2 if "20%" in li_choice else 0))
 
-    # --- ROI COMPARISONS ---
+    # Depreciation Logic
+    st.write("**Depreciation Strategy (2026 Policy)**")
+    dep_col1, dep_col2 = st.columns(2)
+    use_bonus = dep_col1.checkbox("Apply 20% Bonus Depreciation", False)
+    use_macrs = dep_col2.checkbox("Apply 5-Year MACRS Schedule", True)
+    
+    # Approx cash-value of depreciation in Year 1 (21% Corp Tax)
+    dep_rate = (0.20 * 0.21 if use_bonus else 0) + (0.20 * 0.21 if use_macrs else 0) 
+
+    # --- CORE METRICS ENGINE ---
     capture_2025 = TREND_DATA_WEST["Negative (<$0)"]["2025"] + TREND_DATA_WEST["$0 - $0.02"]["2025"]
-    def get_metrics(m, b, itc):
+    def get_metrics(m, b, itc, dep):
         ma, ba, base = (capture_2025*8760*m*(breakeven-12)), (0.005*8760*b*1200), (solar_cap*82500+wind_cap*124000)
         m_cap, b_cap = ((m*1e6)/m_eff)*m_cost, b*BATT_COST_PER_MW
         net = m_cap + b_cap*(1-itc)
+        net -= (net * dep) # Applying depreciation tax shelter value
         return ma, ba, base, net, (ma+ba)/net*100 if net>0 else 0, net/(ma+ba) if (ma+ba)>0 else 0
 
     s1_m, s1_b = miner_mw, batt_mw
     s2_m, s2_b = int((solar_cap+wind_cap)*0.2), int((solar_cap+wind_cap)*0.3)
-    s1_pre, s1_post, s2_post = get_metrics(s1_m, s1_b, 0), get_metrics(s1_m, s1_b, tax_rate), get_metrics(s2_m, s2_b, tax_rate)
+    s1_pre, s1_post, s2_post = get_metrics(s1_m, s1_b, 0, 0), get_metrics(s1_m, s1_b, itc_rate, dep_rate), get_metrics(s2_m, s2_b, itc_rate, dep_rate)
 
+    # --- ROI COMPARISONS ---
     st.markdown("---")
     st.subheader("💰 Post-Tax Financial Comparison")
     col_cur, col_opt = st.columns(2)
     with col_cur:
         st.write("#### 1. Current Setup")
-        st.metric("Net Capex", f"${s1_post[3]:,.0f}", delta=f"-${(s1_b*BATT_COST_PER_MW*tax_rate):,.0f}")
+        st.markdown(f"**Physical:** `{s1_m}MW / {s1_b}MW`")
+        st.metric("Net Capex", f"${s1_post[3]:,.0f}", delta=f"-${(s1_pre[3]-s1_post[3]):,.0f}")
         st.metric("IRR", f"{s1_post[4]:.1f}%", delta=f"+{s1_post[4]-s1_pre[4]:.1f}%")
     with col_opt:
         st.write("#### 2. Optimized Setup")
+        st.markdown(f"**Physical:** `{s2_m}MW / {s2_b}MW`")
         st.metric("Net Capex", f"${s2_post[3]:,.0f}")
         st.metric("IRR", f"{s2_post[4]:.1f}%", delta=f"+{s2_post[4]-s1_post[4]:.1f}% over Current")
+
+    # --- METHODOLOGY ---
+    with st.expander("🔍 Calculation Methodology"):
+        st.markdown(f"""
+        1. **Bonus Depreciation:** Under 2026 phase-out, the 100% credit has dropped to **20%**.
+        2. **MACRS:** We apply the 5-Year schedule at a **21%** effective corporate tax rate.
+        3. **ITC Sourcing:** Based on Tesla supply chain for the Midland project.
+        """)
 
     # --- THREE-STAGE EVOLUTION ---
     st.markdown("---")
@@ -126,23 +148,13 @@ with tab1:
 
     c_a, c_b, c_c, c_d = st.columns(4)
     with c_a: draw("1. Pre-Opt", s1_pre, s1_m, s1_b, "Current/No Tax")
-    with c_b: draw("2. Opt (Pre-Tax)", get_metrics(s2_m, s2_b, 0), s2_m, s2_b, "Ideal/No Tax")
+    with c_b: draw("2. Opt (Pre-Tax)", get_metrics(s2_m, s2_b, 0, 0), s2_m, s2_b, "Ideal/No Tax")
     with c_c: draw("3. Current (Post-Tax)", s1_post, s1_m, s1_b, "Current/Full Tax")
     with c_d: draw("4. Opt (Post-Tax)", s2_post, s2_m, s2_b, "Ideal/Full Tax")
 
 with tab2:
     st.subheader("📈 5-Year Price Frequency Dataset")
-    
-    st.markdown("#### 1. West Texas (HB_WEST)")
+    st.write("**West Texas (HB_WEST)**")
     st.table(pd.DataFrame(TREND_DATA_WEST).T.style.format("{:.1%}"))
-    
-    st.markdown("#### 2. ERCOT System-Wide Average")
+    st.write("**ERCOT System-Wide Average**")
     st.table(pd.DataFrame(TREND_DATA_SYSTEM).T.style.format("{:.1%}"))
-    
-    st.markdown("---")
-    st.subheader("🧐 Strategic Trend Analysis")
-    st.write("""
-    * **Negative Pricing Spread:** HB_WEST remains the 'Alpha Hub' for negative prices (12.1% by 2025 vs 4.2% System-wide). This confirms that behind-the-meter (BTM) miners in the West are capturing nearly 3x the 'free fuel' of the broader grid.
-    * **The 2021 Uri Impact:** You can see the spike in the $1.00+ bracket in 2021 (0.8% West vs 1.0% System-wide). System-wide assets were actually *more* exposed to the scarcity pricing, as West Texas had localized transmission constraints during the freeze.
-    * **Solar Saturation:** The growth in the $0-$0.02 bracket is now a system-wide phenomenon, not just a West Texas one. This proves that the 'Hybrid' model is becoming a requirement for energy storage across all of Texas, not just the Permian.
-    """)
