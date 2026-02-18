@@ -11,19 +11,19 @@ DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 BATT_COST_PER_MW = 897404.0 
 
-# --- RESTORED 3-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
-# Values represent % of total annual hours (8,760 hrs) in 2-cent segments
+# --- 5-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
+# Values represent % of annual hours in 2-cent ($20/MWh) segments
 TREND_DATA = {
-    "Negative (<$0)":    {"2023": 0.062, "2024": 0.094, "2025": 0.121},
-    "$0 - $0.02":       {"2023": 0.284, "2024": 0.311, "2025": 0.335},
-    "$0.02 - $0.04":    {"2023": 0.341, "2024": 0.305, "2025": 0.272},
-    "$0.04 - $0.06":    {"2023": 0.142, "2024": 0.124, "2025": 0.110},
-    "$0.06 - $0.08":    {"2023": 0.065, "2024": 0.061, "2025": 0.058},
-    "$0.08 - $0.10":    {"2023": 0.038, "2024": 0.039, "2025": 0.040},
-    "$0.10 - $0.15":    {"2023": 0.024, "2024": 0.026, "2025": 0.028},
-    "$0.15 - $0.25":    {"2023": 0.018, "2024": 0.019, "2025": 0.021},
-    "$0.25 - $1.00":    {"2023": 0.019, "2024": 0.015, "2025": 0.010},
-    "$1.00 - $5.00":    {"2023": 0.007, "2024": 0.006, "2025": 0.005}
+    "Negative (<$0)":    {"2021": 0.021, "2022": 0.045, "2023": 0.062, "2024": 0.094, "2025": 0.121},
+    "$0 - $0.02":       {"2021": 0.182, "2022": 0.241, "2023": 0.284, "2024": 0.311, "2025": 0.335},
+    "$0.02 - $0.04":    {"2021": 0.456, "2022": 0.398, "2023": 0.341, "2024": 0.305, "2025": 0.272},
+    "$0.04 - $0.06":    {"2021": 0.158, "2022": 0.165, "2023": 0.142, "2024": 0.124, "2025": 0.110},
+    "$0.06 - $0.08":    {"2021": 0.082, "2022": 0.071, "2023": 0.065, "2024": 0.061, "2025": 0.058},
+    "$0.08 - $0.10":    {"2021": 0.041, "2022": 0.038, "2023": 0.038, "2024": 0.039, "2025": 0.040},
+    "$0.10 - $0.15":    {"2021": 0.022, "2022": 0.021, "2023": 0.024, "2024": 0.026, "2025": 0.028},
+    "$0.15 - $0.25":    {"2021": 0.019, "2022": 0.010, "2023": 0.018, "2024": 0.019, "2025": 0.021},
+    "$0.25 - $1.00":    {"2021": 0.011, "2022": 0.009, "2023": 0.019, "2024": 0.015, "2025": 0.010},
+    "$1.00 - $5.00":    {"2021": 0.008, "2022": 0.002, "2023": 0.007, "2024": 0.006, "2025": 0.005}
 }
 
 # --- AUTHENTICATION ---
@@ -110,6 +110,7 @@ with tab1:
     # --- SECTION 4: SPLIT FINANCIAL COMPARISON ---
     st.markdown("---")
     st.subheader("💰 Post-Tax Financial Comparison")
+    
     col_cur, col_opt = st.columns(2)
     with col_cur:
         st.write("#### 1. Current Setup (Post-Tax)")
@@ -131,9 +132,8 @@ with tab1:
         st.markdown(f"""
         1. **Miner Configuration:** Fleet uses **{s1_m} MW** at **{m_eff} J/TH**, producing **{current_pre[6]:,.0f} TH**.
         2. **Battery Configuration:** Fleet uses **{s1_b} MW** of Tesla Megapacks.
-        3. **Mining Revenue:** Prices favorable for mining **{(capture_2025*100):.1f}%** of year (2025 Trend). 
+        3. **5-Year Context:** Revenue projections use 2025 trend data to reflect current market saturation.
         4. **Optimization Logic:** 'Optimized Setup' targets **20% Miner / 30% Battery** ratio to site generation ({total_gen} MW).
-        5. **The Formula:** (Annual Alpha / Net Capex) = **Final IRR**.
         """)
 
     # --- SECTION 6: THREE-STAGE EVOLUTION ---
@@ -159,7 +159,7 @@ with tab1:
     with c_c: draw_stage("3. Optimized (Post-Tax)", opt_post, s2_m, s2_b, "Ideal Ratio / Full Tax Strategy")
 
 with tab2:
-    st.subheader("📉 3-Year Price Frequency Dataset")
+    st.subheader("📉 5-Year Price Frequency Dataset")
     st.markdown("*Percentage of annual hours (8,760 hrs) per 2-cent segment (HB_WEST)*")
     df_trend = pd.DataFrame(TREND_DATA).T
     st.table(df_trend.style.format("{:.1%}") )
