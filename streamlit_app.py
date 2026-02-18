@@ -11,7 +11,7 @@ DASHBOARD_PASSWORD = "123"
 LAT, LONG = 31.997, -102.077
 BATT_COST_PER_MW = 897404.0 
 
-# --- 5-YEAR HISTORICAL FREQUENCY DATASET (HB_WEST) ---
+# --- 5-YEAR HISTORICAL FREQUENCY DATASETS (RESTORED 2¢ INTERVALS) ---
 TREND_DATA_WEST = {
     "Negative (<$0)":    {"2021": 0.021, "2022": 0.045, "2023": 0.062, "2024": 0.094, "2025": 0.121},
     "$0 - $0.02":       {"2021": 0.182, "2022": 0.241, "2023": 0.284, "2024": 0.311, "2025": 0.335},
@@ -25,11 +25,13 @@ TREND_DATA_WEST = {
     "$1.00 - $5.00":    {"2021": 0.008, "2022": 0.002, "2023": 0.007, "2024": 0.006, "2025": 0.005}
 }
 
-# --- AUTHENTICATION & DATA ENGINE ---
+TREND_DATA_SYSTEM = TREND_DATA_WEST # Placeholder for system-wide logic alignment
+
+# --- AUTHENTICATION ---
 if "password_correct" not in st.session_state: st.session_state.password_correct = False
 def check_password():
     if st.session_state.password_correct: return True
-    st.title("⚡ The Hybrid Alpha Play")
+    st.title("⚡ Midland Hybrid Alpha Play")
     pwd = st.text_input("Enter Access Password", type="password")
     if pwd == DASHBOARD_PASSWORD:
         st.session_state.password_correct = True
@@ -48,7 +50,7 @@ def get_site_data():
 
 price_hist = get_site_data()
 
-# --- TAB 1: ASSET DASHBOARD ---
+# --- APP TABS ---
 tab1, tab2 = st.tabs(["📊 Performance Evolution", "📈 Long-Term Volatility"])
 
 with tab1:
@@ -71,28 +73,29 @@ with tab1:
     st.markdown("---")
     st.subheader("🏛️ Commercial Tax Strategy")
     tx1, tx2, tx3 = st.columns(3)
-    tax_rate = (0.3 if tx1.checkbox("Apply 30% Base ITC", True) else 0) + (0.1 if tx2.checkbox("Apply 10% Domestic Content", False) else 0)
+    t_rate = (0.3 if tx1.checkbox("Apply 30% Base ITC", True) else 0) + (0.1 if tx2.checkbox("Apply 10% Domestic Content", False) else 0)
     li_choice = tx3.selectbox("Underserved Bonus", ["None", "10% Bonus", "20% Bonus"])
-    tax_rate += (0.1 if "10%" in li_choice else (0.2 if "20%" in li_choice else 0))
+    t_rate += (0.1 if "10%" in li_choice else (0.2 if "20%" in li_choice else 0))
 
-    # --- SECTION 3: CORE CALCULATIONS ---
+    # --- DYNAMIC RATIO LOGIC (FIXED) ---
     total_gen = solar_cap + wind_cap
+    if total_gen > 0:
+        s_pct = solar_cap / total_gen
+        w_pct = wind_cap / total_gen
+    else:
+        s_pct, w_pct = 0.5, 0.5
+
+    # Weighted Sizing Targets: Solar (10/50) vs Wind (25/25)
+    ideal_m_mw = int(total_gen * ((s_pct * 0.10) + (w_pct * 0.25)))
+    ideal_b_mw = int(total_gen * ((s_pct * 0.50) + (w_pct * 0.25)))
+
+    # --- REVENUE ENGINE ---
     capture_2025 = TREND_DATA_WEST["Negative (<$0)"]["2025"] + TREND_DATA_WEST["$0 - $0.02"]["2025"]
     
-    # NEW: Dynamic Ratio Logic
-    # If 100% Solar -> 10/50. If 100% Wind -> 25/25. Hybrid (50/50) -> 20/30.
-    s_ratio = solar_cap / total_gen if total_gen > 0 else 0.5
-    w_ratio = wind_cap / total_gen if total_gen > 0 else 0.5
-    
-    ideal_m_pct = (s_ratio * 0.10) + (w_ratio * 0.25)
-    ideal_b_pct = (s_ratio * 0.50) + (w_ratio * 0.25)
-    
     def get_stage_metrics(m, b, itc_r):
-        # Adjusting Alpha capture based on Fuel Source
-        # Solar increases Battery Alpha (evening spike focus)
-        # Wind increases Mining Alpha (overnight negative focus)
-        ma_factor = 1.0 + (w_ratio * 0.20)
-        ba_factor = 1.0 + (s_ratio * 0.25)
+        # Fuel-based Alpha multiplier
+        ma_factor = 1.0 + (w_pct * 0.20) # Wind helps mining
+        ba_factor = 1.0 + (s_pct * 0.25) # Solar helps battery
         
         ma = (capture_2025 * 8760 * m * (breakeven - 12)) * ma_factor
         ba = (0.005 * 8760 * b * 1200) * ba_factor
@@ -100,63 +103,55 @@ with tab1:
         
         m_th = (m * 1000000) / m_eff
         m_cap, b_cap = m_th * m_cost, b * BATT_COST_PER_MW
-        net_cap = m_cap + (b_cap * (1 - itc_r))
-        irr = (ma + ba) / net_cap * 100 if net_cap > 0 else 0
-        roi = net_cap / (ma + ba) if (ma + ba) > 0 else 0
-        return ma, ba, base, net_cap, irr, roi, m_th, m_cap, b_cap
+        net = m_cap + (b_cap * (1 - itc_r))
+        irr = (ma + ba) / net * 100 if net > 0 else 0
+        roi = net / (ma + ba) if (ma + ba) > 0 else 0
+        return ma, ba, base, net, irr, roi, m_th, m_cap, b_cap
 
-    # Stages Data
-    s1_m, s1_b = miner_mw, batt_mw
-    s2_m, s2_b = int(total_gen * ideal_m_pct), int(total_gen * ideal_b_pct)
-    
-    current_pre = get_stage_metrics(s1_m, s1_b, 0)
-    current_post = get_stage_metrics(s1_m, s1_b, tax_rate)
-    opt_pre = get_stage_metrics(s2_m, s2_b, 0)
-    opt_post = get_stage_metrics(s2_m, s2_b, tax_rate)
+    s1_metrics = get_stage_metrics(miner_mw, batt_mw, 0)
+    s2_metrics = get_stage_metrics(ideal_m_mw, ideal_b_mw, 0)
+    s3_metrics = get_stage_metrics(miner_mw, batt_mw, t_rate)
+    s4_metrics = get_stage_metrics(ideal_m_mw, ideal_b_mw, t_rate)
 
-    # --- SECTION 4: SPLIT FINANCIAL COMPARISON ---
+    # --- SPLIT FINANCIAL COMPARISON ---
     st.markdown("---")
     st.subheader("💰 Post-Tax Financial Comparison")
-    col_cur, col_opt = st.columns(2)
-    with col_cur:
+    cl1, cl2 = st.columns(2)
+    with cl1:
         st.write("#### 1. Current Setup (Post-Tax)")
-        st.markdown(f"**Physical Config:** `{s1_m} MW` Miners | `{s1_b} MW` Battery")
-        st.metric("Post-Tax IRR", f"{current_post[4]:.1f}%", delta=f"+{current_post[4]-current_pre[4]:.1f}% vs Pre-Tax")
-
-    with col_opt:
+        st.caption(f"{miner_mw}MW Miners | {batt_mw}MW Battery")
+        st.metric("Post-Tax IRR", f"{s3_metrics[4]:.1f}%", delta=f"+{s3_metrics[4]-s1_metrics[4]:.1f}% vs Pre-Tax")
+    with cl2:
         st.write("#### 2. Optimized Setup (Post-Tax)")
-        st.markdown(f"**Physical Config:** `{s2_m} MW` Miners | `{s2_b} MW` Battery")
-        st.metric("Post-Tax IRR", f"{opt_post[4]:.1f}%", delta=f"+{opt_post[4]-current_post[4]:.1f}% over Current")
+        st.caption(f"{ideal_m_mw}MW Miners | {ideal_b_mw}MW Battery")
+        st.metric("Post-Tax IRR", f"{s4_metrics[4]:.1f}%", delta=f"+{s4_metrics[4]-s3_metrics[4]:.1f}% over Current")
 
-    # --- SECTION 5: METHODOLOGY ---
+    # --- METHODOLOGY ---
     with st.expander("🔍 View Calculation Methodology"):
         st.markdown(f"""
-        1. **Dynamic Ratios:** Ideal sizing is weighted by fuel source. **Solar-Heavy** sites prioritize storage (up to 50% capacity) to catch evening ramps. **Wind-Heavy** sites prioritize compute (up to 25% capacity) to catch overnight negative pricing.
-        2. **Capture Factors:** Mining Alpha is boosted by **{w_ratio*100:.0f}%** due to Wind correlation. Battery Alpha is boosted by **{s_ratio*100:.0f}%** due to Solar correlation.
+        1. **Dynamic Sizing Logic:** Solar generation requires higher battery storage to capture evening ramps, while Wind favors miners to capture overnight negative prices.
+        2. **Weighting Applied:** Site is **{s_pct*100:.0f}% Solar** / **{w_pct*100:.0f}% Wind**. 
+        3. **Optimized Target:** Calculated as **{ideal_m_mw}MW Miners** and **{ideal_b_mw}MW Battery**.
         """)
 
-    # --- SECTION 6: THREE-STAGE EVOLUTION ---
+    # --- EVOLUTION CARDS ---
     st.markdown("---")
     st.subheader("📋 Historical Performance Evolution")
-    def draw_stage(label, metrics, m_val, b_val, subtitle):
-        ma, ba, base, cap, irr, roi, m_th, m_cap, b_cap = metrics
-        st.write(f"### {label}")
-        st.caption(f"{subtitle} ({m_val} MW / {b_val} MW)")
-        total = ma + ba + base
-        st.markdown(f"<h1 style='color: #28a745; margin-bottom: 0;'>${total:,.0f}</h1>", unsafe_allow_html=True)
-        st.markdown(f"**↑ ${ma+ba:,.0f} Alpha | {irr:.1f}% IRR**")
-        st.write(f"* ⚡ Grid: `${base:,.0f}` | ⛏️ Mining: `${ma:,.0f}` | 🔋 Battery: `${ba:,.0f}`")
+    def draw_c(lbl, met, m_v, b_v, sub):
+        st.write(f"### {lbl}")
+        st.caption(f"{sub} ({m_v}MW / {b_v}MW)")
+        total = met[0] + met[1] + met[2]
+        st.markdown(f"<h1 style='color: #28a745;'>${total:,.0f}</h1>", unsafe_allow_html=True)
+        st.markdown(f"**↑ ${met[0]+met[1]:,.0f} Alpha | {met[4]:.1f}% IRR**")
+        st.write(f"* ⚡ Grid: `${met[2]:,.0f}` | ⛏️ Mining: `${met[0]:,.0f}` | 🔋 Battery: `${met[1]:,.0f}`")
         st.write("---")
 
     c_a, c_b, c_c, c_d = st.columns(4)
-    with c_a: draw_stage("1. Pre-Opt", current_pre, s1_m, s1_b, "Current/No Tax")
-    with c_b: draw_stage("2. Opt (Pre-Tax)", opt_pre, s2_m, s2_b, "Ideal/No Tax")
-    with c_c: draw_stage("3. Current (Post-Tax)", current_post, s1_m, s1_b, "Current/Full Tax")
-    with c_d: draw_stage("4. Opt (Post-Tax)", opt_post, s2_m, s2_b, "Ideal/Full Tax")
+    with c_a: draw_c("1. Pre-Opt", s1_metrics, miner_mw, batt_mw, "Current/No Tax")
+    with c_b: draw_c("2. Opt (Pre-Tax)", s2_metrics, ideal_m_mw, ideal_b_mw, "Ideal/No Tax")
+    with c_c: draw_c("3. Current (Post-Tax)", s3_metrics, miner_mw, batt_mw, "Current/Full Tax")
+    with c_d: draw_c("4. Opt (Post-Tax)", s4_metrics, ideal_m_mw, ideal_b_mw, "Ideal/Full Tax")
 
 with tab2:
-    st.subheader("📉 5-Year Price Frequency Dataset")
-    st.write("**West Texas (HB_WEST)**")
-    st.table(pd.DataFrame(TREND_DATA_WEST).T.style.format("{:.1%}"))
-    st.write("**ERCOT System-Wide Average**")
+    st.subheader("📈 5-Year Price Frequency (HB_WEST)")
     st.table(pd.DataFrame(TREND_DATA_WEST).T.style.format("{:.1%}"))
