@@ -137,30 +137,42 @@ price_hist = get_live_data()
 breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
 
 # --- 4.5 LIVE PERIOD ALPHA CALCULATIONS (5-MINUTE INTERVALS) - FIXED ---
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)  # Cache for 1 hour instead of 5 min for longer data
 def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, days):
     """
     Calculate actual mining and battery alpha from live ERCOT 5-minute prices
-    ERCOT RTM prices: 12 per hour × 24 hours = 288 data points per day
-    days: number of days to analyze (1=24H, 7=7D, 30=30D, 182=6M, 365=1Y)
+    Fetches full historical data for requested period
     """
-    # FIX 1: Use available data - don't fail if we don't have full period
-    data_points_needed = min(days * 288, len(price_series))
-    
-    if data_points_needed < 288:  # Need at least 1 day
-        return 0, 0
-    
-    period_data = price_series.iloc[-data_points_needed:]
+    try:
+        # Calculate start date based on requested days
+        end_date = pd.Timestamp.now(tz="US/Central")
+        start_date = end_date - pd.Timedelta(days=days)
+        
+        # Fetch fresh data for the full period
+        iso = gridstatus.Ercot()
+        df = iso.get_rtm_lmp(start=start_date, end=end_date, verbose=False)
+        period_data = df[df['Location'] == 'HB_WEST'].set_index('Time').sort_index()['LMP']
+        
+        # If not enough data, return 0
+        if len(period_data) < 288:  # Need at least 1 day
+            return 0, 0
+            
+    except:
+        # Fallback: use provided price_series if available
+        data_points_needed = min(days * 288, len(price_series))
+        if data_points_needed < 288:
+            return 0, 0
+        period_data = price_series.iloc[-data_points_needed:]
     
     # Calculate sum of all 5-minute intervals
     mining_alpha_sum = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
     battery_alpha_sum = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
     
-    # FIX 2: Average the 5-min intervals by dividing by 12 (5-min intervals per hour)
+    # Average the 5-min intervals by dividing by 12 (5-min intervals per hour)
     mining_alpha_hourly = mining_alpha_sum / 12.0
     battery_alpha_hourly = battery_alpha_sum / 12.0
     
-    # FIX 3: Scale to actual period length (in case we don't have full requested days)
+    # Scale to actual period length
     actual_days = len(period_data) / 288.0
     mining_alpha = mining_alpha_hourly * actual_days
     battery_alpha = battery_alpha_hourly * actual_days
