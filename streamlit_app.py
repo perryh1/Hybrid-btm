@@ -50,7 +50,6 @@ def check_password():
         st.markdown('<p class="auth-header">Executive Access</p>', unsafe_allow_html=True)
         st.markdown('<p class="auth-sub">Grid Intelligence & Asset Optimization Portal</p>', unsafe_allow_html=True)
         
-        # --- EXECUTIVE BRIEF SECTION ---
         st.markdown('<p class="brief-title">Platform Overview</p>', unsafe_allow_html=True)
         st.markdown("""
         <div class="brief-section">
@@ -120,7 +119,7 @@ TREND_DATA_SYSTEM = {
     "$0.04 - $0.06": {"2021": 0.215, "2022": 0.228, "2023": 0.198, "2024": 0.182, "2025": 0.165},
     "$0.06 - $0.08": {"2021": 0.091, "2022": 0.082, "2023": 0.077, "2024": 0.072, "2025": 0.068},
     "$0.08 - $0.10": {"2021": 0.032, "2022": 0.021, "2023": 0.031, "2024": 0.034, "2025": 0.036},
-    "$0.10 - $0.15": {"2021": 0.012, "2022": 0.009, "2023": 0.018, "2024": 0.021, "2023": 0.023},
+    "$0.10 - $0.15": {"2021": 0.012, "2022": 0.009, "2023": 0.018, "2024": 0.021, "2025": 0.023},
     "$0.15 - $0.25": {"2021": 0.008, "2022": 0.004, "2023": 0.012, "2024": 0.014, "2025": 0.016},
     "$0.25 - $1.00": {"2021": 0.004, "2022": 0.003, "2023": 0.016, "2024": 0.010, "2025": 0.004},
     "$1.00 - $5.00": {"2021": 0.010, "2022": 0.003, "2023": 0.010, "2024": 0.006, "2025": 0.003}
@@ -147,7 +146,6 @@ def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, d
     """
     data_points_needed = days * 288
     if len(price_series) < data_points_needed:
-        # Not enough data, return 0
         return 0, 0
     
     period_data = price_series.iloc[-data_points_needed:]
@@ -201,12 +199,10 @@ with t_evolution:
     st.markdown("---")
     st.subheader("📅 Historical Alpha Potential (Revenue Split)")
     
-    # Toggle for live data
     toggle_col1, toggle_col2 = st.columns([3, 1])
     with toggle_col2:
         use_live_data = st.toggle("📊 Use Live Data", value=False)
     
-    # Explanatory text about calculations
     with st.expander("📊 How These Calculations Work"):
         st.markdown("""
         **Historical Estimate (cap_2025):**
@@ -256,7 +252,6 @@ with t_evolution:
             st.write(f" * 🔋 Battery: `${ba:,.0f}` ({ba_pct:+.1f}%)")
             st.write("---")
     
-    # All periods now use live data toggle
     show_split(h1, "24H", 1, 101116, use_live=use_live_data)
     show_split(h2, "7D", 7, 704735, use_live=use_live_data)
     show_split(h3, "30D", 30, 3009339, use_live=use_live_data)
@@ -303,13 +298,11 @@ with t_volatility:
     st.subheader("📈 Institutional Volatility Analysis")
     st.write("The volatility of the ERCOT grid is undergoing a significant structural shift, characterized by a widening spread between the upper (scarcity) and lower (excess/negative) pricing bounds.")
     
-    # 1. Lower Bound
     st.markdown("#### 1. The Lower Bound: Exponential Growth of Negative Pricing")
     st.write("The lower pricing bound is increasingly defined by 'excess supply' events, where the grid has more power than it can consume or export.")
     st.write("* **Solar Saturation:** As solar capacity grows, the frequency of prices in the $0 - $0.02/kWh bracket has transitioned from a localized West Texas issue to a system-wide phenomenon.")
     st.write("* **HB_WEST Dominance:** West Texas remains the 'Alpha Hub' for negative pricing. By 2025, negative price frequency in the West is projected to reach **12.1%**.")
     
-    # 2. Upper Bound
     st.markdown("#### 2. The Upper Bound: Scarcity and Peak Pricing")
     st.write("The upper bound is becoming more volatile due to 'scarcity' events when renewable generation drops off just as demand peaks.")
     st.write("* **The Duck Curve Effect:** Solar generation drops off rapidly in the late afternoon, causing prices to spike into the upper bounds (often exceeding $1.00 - $5.00/kWh).")
