@@ -4,6 +4,8 @@ import numpy as np
 import plotly.graph_objects as go
 import requests
 import gridstatus
+import os
+import pickle
 from datetime import datetime, timedelta
 
 # --- 1. CORE SYSTEM CONFIGURATION ---
@@ -12,6 +14,29 @@ st.set_page_config(layout="wide", page_title="Hybrid OS | Grid Intelligence")
 DASHBOARD_PASSWORD = "123"
 BATT_COST_PER_MW = 897404.0 
 CORP_TAX_RATE = 0.21 
+CACHE_FILE = "ercot_price_cache.pkl"
+CACHE_EXPIRY_HOURS = 1
+
+# --- CACHE FUNCTIONS ---
+def load_cached_prices():
+    """Load prices from local cache if fresh"""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'rb') as f:
+                data = pickle.load(f)
+                if data['timestamp'] > datetime.now() - timedelta(hours=CACHE_EXPIRY_HOURS):
+                    return data['prices']
+        except:
+            pass
+    return None
+
+def save_cached_prices(prices):
+    """Save prices to local cache"""
+    try:
+        with open(CACHE_FILE, 'wb') as f:
+            pickle.dump({'prices': prices, 'timestamp': datetime.now()}, f)
+    except:
+        pass
 
 # --- 2. UNIFIED AUTHENTICATION PORTAL WITH EXECUTIVE BRIEF ---
 if "password_correct" not in st.session_state: 
@@ -125,59 +150,77 @@ TREND_DATA_SYSTEM = {
     "$1.00 - $5.00": {"2021": 0.010, "2022": 0.003, "2023": 0.010, "2024": 0.006, "2025": 0.003}
 }
 
+# --- FETCH 365 DAYS ONCE AND CACHE LOCALLY ---
 @st.cache_data(ttl=300)
 def get_live_data():
+    """Fetch 365 days of ERCOT data once and cache locally"""
+    cached = load_cached_prices()
+    if cached is not None:
+        return cached
+    
     try:
-        iso = gridstatus.Ercot()
-        df = iso.get_rtm_lmp(start=pd.Timestamp.now(tz="US/Central")-pd.Timedelta(days=31), end=pd.Timestamp.now(tz="US/Central"), verbose=False)
-        return df[df['Location'] == 'HB_WEST'].set_index('Time').sort_index()['LMP']
-    except: return pd.Series(np.random.uniform(15, 45, 744))
+        all_data = []
+        end_date = pd.Timestamp.now(tz="US/Central")
+        start_date = end_date - pd.Timedelta(days=365)
+        
+        current_date = start_date
+        while current_date < end_date:
+            chunk_end = min(current_date + pd.Timedelta(days=30), end_date)
+            try:
+                iso = gridstatus.Ercot()
+                df = iso.get_rtm_lmp(start=current_date, end=chunk_end, verbose=False)
+                if df is not None and len(df) > 0:
+                    chunk_data = df[df['Location'] == 'HB_WEST'].set_index('Time').sort_index()['LMP']
+                    all_data.append(chunk_data)
+            except:
+                pass
+            current_date = chunk_end
+        
+        if all_data:
+            full_series = pd.concat(all_data).drop_duplicates().sort_index()
+            save_cached_prices(full_series)
+            return full_series
+        else:
+            return pd.Series(np.random.uniform(15, 45, 8760))
+    except:
+        return pd.Series(np.random.uniform(15, 45, 8760))
 
 price_hist = get_live_data()
 breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
 
-# --- 4.5 LIVE PERIOD ALPHA CALCULATIONS (5-MINUTE INTERVALS) - FIXED ---
-@st.cache_data(ttl=3600)  # Cache for 1 hour instead of 5 min for longer data
+# --- 4.5 CALCULATE FROM CACHED DATA (NO MORE API CALLS) ---
+@st.cache_data(ttl=3600)
 def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, days):
-    """
-    Calculate actual mining and battery alpha from live ERCOT 5-minute prices
-    Fetches full historical data for requested period
-    """
+    """Calculate mining/battery alpha from CACHED data - NO API CALLS"""
     try:
-        # Calculate start date based on requested days
-        end_date = pd.Timestamp.now(tz="US/Central")
-        start_date = end_date - pd.Timedelta(days=days)
+        # Get last N days from cached series
+        data_points_needed = days * 288
         
-        # Fetch fresh data for the full period
-        iso = gridstatus.Ercot()
-        df = iso.get_rtm_lmp(start=start_date, end=end_date, verbose=False)
-        period_data = df[df['Location'] == 'HB_WEST'].set_index('Time').sort_index()['LMP']
+        if len(price_series) < data_points_needed:
+            period_data = price_series
+        else:
+            period_data = price_series.iloc[-data_points_needed:]
         
-        # If not enough data, return 0
-        if len(period_data) < 288:  # Need at least 1 day
+        if len(period_data) < 288:
             return 0, 0
-            
+        
+        # Calculate sum of all 5-minute intervals
+        mining_alpha_sum = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
+        battery_alpha_sum = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
+        
+        # Average the 5-min intervals
+        mining_alpha_hourly = mining_alpha_sum / 12.0
+        battery_alpha_hourly = battery_alpha_sum / 12.0
+        
+        # Scale to actual period
+        actual_days = len(period_data) / 288.0
+        mining_alpha = mining_alpha_hourly * actual_days
+        battery_alpha = battery_alpha_hourly * actual_days
+        
+        return mining_alpha, battery_alpha
+    
     except:
-        # Fallback: use provided price_series if available
-        data_points_needed = min(days * 288, len(price_series))
-        if data_points_needed < 288:
-            return 0, 0
-        period_data = price_series.iloc[-data_points_needed:]
-    
-    # Calculate sum of all 5-minute intervals
-    mining_alpha_sum = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
-    battery_alpha_sum = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
-    
-    # Average the 5-min intervals by dividing by 12 (5-min intervals per hour)
-    mining_alpha_hourly = mining_alpha_sum / 12.0
-    battery_alpha_hourly = battery_alpha_sum / 12.0
-    
-    # Scale to actual period length
-    actual_days = len(period_data) / 288.0
-    mining_alpha = mining_alpha_hourly * actual_days
-    battery_alpha = battery_alpha_hourly * actual_days
-    
-    return mining_alpha, battery_alpha
+        return 0, 0
 
 # --- 5. DASHBOARD INTERFACE ---
 t_evolution, t_tax, t_volatility = st.tabs(["📊 Performance Evolution", "🏛️ Institutional Tax Strategy", "📈 Long-Term Volatility"])
@@ -244,10 +287,10 @@ with t_evolution:
         **Live Actual Data:**
         - Analyzes real ERCOT RTM prices (5-minute intervals, 288 per day)
         - **24H**: Last 288 data points (1 day)
-        - **7D**: Last 2,016 data points (7 days, uses available data)
-        - **30D**: Last 8,640 data points (30 days, uses available data)
-        - **6M**: Last ~43,200 data points (182 days, uses available data)
-        - **1Y**: Last ~87,360 data points (365 days, uses available data)
+        - **7D**: Last 2,016 data points (7 days)
+        - **30D**: Last 8,640 data points (30 days)
+        - **6M**: Last ~43,200 data points (182 days)
+        - **1Y**: Last ~87,360 data points (365 days)
         - Mining: Sum of (max(0, breakeven - price) × ideal_m) for each interval
         - Battery: Sum of (max(0, price - breakeven) × ideal_b) for each interval
         - Results are normalized by hour and scaled to period length
@@ -276,24 +319,14 @@ with t_evolution:
         
         with col:
             st.markdown(f"#### {lbl} ({data_source})")
-            
-            # Grid Baseline
             st.markdown(f"**📊 Grid Baseline**")
             st.markdown(f"<h3 style='margin-bottom:5px; color:#ffffff;'>${cr:,.0f}</h3>", unsafe_allow_html=True)
-            
-            # Alpha Increase
             st.markdown(f"**⬆️ Alpha Increase**")
             st.markdown(f"<h3 style='margin-bottom:5px; color:#28a745;'>${total_alpha:,.0f}</h3>", unsafe_allow_html=True)
-            
-            # Total with Alpha
             st.markdown(f"**💰 Total**")
             st.markdown(f"<h3 style='margin-bottom:5px; color:#0052FF;'>${total_with_baseline:,.0f}</h3>", unsafe_allow_html=True)
-            
-            # Percentage Increase
             st.markdown(f"**📈 % Increase**")
             st.markdown(f"<h2 style='margin-bottom:10px; color:#FFD700;'>{pct_increase:+.1f}%</h2>", unsafe_allow_html=True)
-            
-            # Breakdown
             st.markdown(f"<hr style='margin: 8px 0;'>", unsafe_allow_html=True)
             st.write(f"⛏️ Mining: `${ma:,.0f}` ({ma_pct:+.1f}%)")
             st.write(f"🔋 Battery: `${ba:,.0f}` ({ba_pct:+.1f}%)")
@@ -474,7 +507,6 @@ with t_volatility:
     st.markdown("---")
     st.markdown("#### 📊 Comparative ISO Analysis")
     
-    # Summary comparison metrics
     iso_comparison = {
         "ISO": ["ERCOT", "CAISO", "PJM", "SPP"],
         "Negative 2025": ["12.1%", "14.5%", "1.2%", "5.8%"],
