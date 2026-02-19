@@ -136,7 +136,7 @@ def get_live_data():
 price_hist = get_live_data()
 breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
 
-# --- 4.5 LIVE PERIOD ALPHA CALCULATIONS (5-MINUTE INTERVALS) ---
+# --- 4.5 LIVE PERIOD ALPHA CALCULATIONS (5-MINUTE INTERVALS) - FIXED ---
 @st.cache_data(ttl=300)
 def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, days):
     """
@@ -144,13 +144,27 @@ def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, d
     ERCOT RTM prices: 12 per hour × 24 hours = 288 data points per day
     days: number of days to analyze (1=24H, 7=7D, 30=30D, 182=6M, 365=1Y)
     """
-    data_points_needed = days * 288
-    if len(price_series) < data_points_needed:
+    # FIX 1: Use available data - don't fail if we don't have full period
+    data_points_needed = min(days * 288, len(price_series))
+    
+    if data_points_needed < 288:  # Need at least 1 day
         return 0, 0
     
     period_data = price_series.iloc[-data_points_needed:]
-    mining_alpha = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
-    battery_alpha = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
+    
+    # Calculate sum of all 5-minute intervals
+    mining_alpha_sum = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
+    battery_alpha_sum = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
+    
+    # FIX 2: Average the 5-min intervals by dividing by 12 (5-min intervals per hour)
+    mining_alpha_hourly = mining_alpha_sum / 12.0
+    battery_alpha_hourly = battery_alpha_sum / 12.0
+    
+    # FIX 3: Scale to actual period length (in case we don't have full requested days)
+    actual_days = len(period_data) / 288.0
+    mining_alpha = mining_alpha_hourly * actual_days
+    battery_alpha = battery_alpha_hourly * actual_days
+    
     return mining_alpha, battery_alpha
 
 # --- 5. DASHBOARD INTERFACE ---
@@ -218,12 +232,13 @@ with t_evolution:
         **Live Actual Data:**
         - Analyzes real ERCOT RTM prices (5-minute intervals, 288 per day)
         - **24H**: Last 288 data points (1 day)
-        - **7D**: Last 2,016 data points (7 days)
-        - **30D**: Last 8,640 data points (30 days)
-        - **6M**: Last ~43,200 data points (182 days)
-        - **1Y**: Last ~87,360 data points (365 days, if available)
+        - **7D**: Last 2,016 data points (7 days, uses available data)
+        - **30D**: Last 8,640 data points (30 days, uses available data)
+        - **6M**: Last ~43,200 data points (182 days, uses available data)
+        - **1Y**: Last ~87,360 data points (365 days, uses available data)
         - Mining: Sum of (max(0, breakeven - price) × ideal_m) for each interval
         - Battery: Sum of (max(0, price - breakeven) × ideal_b) for each interval
+        - Results are normalized by hour and scaled to period length
         """)
     
     h1, h2, h3, h4, h5 = st.columns(5)
