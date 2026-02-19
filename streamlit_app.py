@@ -137,6 +137,17 @@ def get_live_data():
 price_hist = get_live_data()
 breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
 
+# --- 4.5 LIVE 24H ALPHA CALCULATION ---
+@st.cache_data(ttl=300)
+def calculate_24h_live_alpha(price_series, breakeven_val, ideal_m, ideal_b):
+    """Calculate actual mining and battery alpha from last 24 hours of live prices"""
+    if len(price_series) < 24:
+        return 0, 0
+    last_24h = price_series.iloc[-24:]
+    mining_alpha_24h = sum([max(0, breakeven_val - price) * ideal_m for price in last_24h])
+    battery_alpha_24h = sum([max(0, price - breakeven_val) * ideal_b for price in last_24h])
+    return mining_alpha_24h, battery_alpha_24h
+
 # --- 5. DASHBOARD INTERFACE ---
 t_evolution, t_tax, t_volatility = st.tabs(["📊 Performance Evolution", "🏛️ Institutional Tax Strategy", "📈 Long-Term Volatility"])
 
@@ -182,21 +193,58 @@ with t_evolution:
 
     st.markdown("---")
     st.subheader("📅 Historical Alpha Potential (Revenue Split)")
+    
+    # Toggle for historical vs live
+    toggle_col1, toggle_col2 = st.columns([3, 1])
+    with toggle_col2:
+        use_live_data = st.toggle("Live 24H", value=False)
+    
+    # Explanatory text about calculations
+    with st.expander("📊 How These Calculations Work"):
+        st.markdown("""
+        **Historical Estimate (cap_2025):**
+        - `cap_2025` = Frequency of profitable mining windows in 2025
+          - Sum of: Negative prices (12.1%) + $0-$0.02 prices (33.5%) = **45.6% of hours**
+        - **Mining Alpha Formula:** 
+          - `(cap_2025 × 8760 hours × ideal_m MW × (breakeven - $12/MWh)) × wind_adjustment`
+          - The `$12` represents average profit margin during low-price periods
+        - **Battery Alpha Formula:**
+          - `(0.12 capacity factor × 8760 hours × ideal_b MW × (breakeven + $30/MWh)) × solar_adjustment`
+          - The `$30` represents average price premium during scarcity periods
+        
+        **Live 24H Actual:**
+        - Calculates real mining/battery alpha from ERCOT prices in the last 24 hours
+        - Mining: Sum of (max(0, breakeven - price) × ideal_m) for each hour
+        - Battery: Sum of (max(0, price - breakeven) × ideal_b) for each hour
+        """)
+    
     h1, h2, h3, h4, h5 = st.columns(5)
     dm, db = m_yield_yr / 365, b_yield_yr / 365
-    def show_split(col, lbl, days, base):
+    
+    def show_split(col, lbl, days, base, use_live=False):
         sc = (total_gen / 200); cr = (base * sc) * 0.65
-        ma, ba = dm * days, db * days
+        if use_live and days == 1:
+            ma, ba = calculate_24h_live_alpha(price_hist, breakeven, ideal_m, ideal_b)
+            data_source = "Live"
+        else:
+            ma, ba = dm * days, db * days
+            data_source = "Historical"
+        ma_pct = (ma / cr * 100) if cr > 0 else 0
+        ba_pct = (ba / cr * 100) if cr > 0 else 0
         with col:
-            st.markdown(f"#### {lbl}")
+            st.markdown(f"#### {lbl} ({data_source})")
             st.markdown(f"**Grid Baseline**")
             st.markdown(f"<h2 style='margin-bottom:0;'>${cr:,.0f}</h2>", unsafe_allow_html=True)
             st.markdown(f"<p style='color:#28a745; margin-bottom:0;'>↑ ${(ma + ba):,.0f} Alpha Potential</p>", unsafe_allow_html=True)
-            st.write(f" * ⛏️ Mining Alpha: `${ma:,.0f}`")
-            st.write(f" * 🔋 Battery Alpha: `${ba:,.0f}`")
+            st.write(f" * ⛏️ Mining: `${ma:,.0f}` ({ma_pct:+.1f}%)")
+            st.write(f" * 🔋 Battery: `${ba:,.0f}` ({ba_pct:+.1f}%)")
             st.write("---")
-    show_split(h1, "24H", 1, 101116); show_split(h2, "7D", 7, 704735); show_split(h3, "30D", 30, 3009339)
-    show_split(h4, "6M", 182, 13159992); show_split(h5, "1Y", 365, 26469998)
+    
+    show_split(h1, "24H", 1, 101116, use_live=use_live_data)
+    show_split(h2, "7D", 7, 704735)
+    show_split(h3, "30D", 30, 3009339)
+    show_split(h4, "6M", 182, 13159992)
+    show_split(h5, "1Y", 365, 26469998)
 
 with t_tax:
     st.subheader("🏛️ Institutional Tax Strategy")
