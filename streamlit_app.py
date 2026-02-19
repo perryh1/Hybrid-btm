@@ -208,14 +208,14 @@ def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, d
         mining_alpha_sum = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
         battery_alpha_sum = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
         
-        # Average the 5-min intervals
-        mining_alpha_hourly = mining_alpha_sum / 12.0
-        battery_alpha_hourly = battery_alpha_sum / 12.0
-        
-        # Scale to actual period
+        # Get actual days of data we have
         actual_days = len(period_data) / 288.0
-        mining_alpha = mining_alpha_hourly * actual_days
-        battery_alpha = battery_alpha_hourly * actual_days
+        
+        # Convert 5-minute interval sums to daily averages
+        # Each day has 288 intervals, so divide by 288 to get per-day value
+        # Then multiply by actual_days to get total for period
+        mining_alpha = (mining_alpha_sum / 288.0) * actual_days
+        battery_alpha = (battery_alpha_sum / 288.0) * actual_days
         
         return mining_alpha, battery_alpha
     
