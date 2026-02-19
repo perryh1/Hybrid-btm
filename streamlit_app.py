@@ -518,3 +518,28 @@ with t_volatility:
     }
     
     st.dataframe(pd.DataFrame(iso_comparison), use_container_width=True)
+    with t_price_dsets:
+    # Add the content for the new tab
+    st.markdown("## 📊 Price Datasets")
+    st.markdown(
+        """
+        ### Explore Historical and 24-Hour Live-Time Price Data
+        
+        This section provides a closer look at historical energy prices and live-time price datasets 
+        from grid monitoring. These datasets are used to calculate 24-hour revenue and operational strategies.
+        Graphs show the trends and fluctuations.
+        """
+    )
+
+    # Create columns to display both datasets: Live-time price vs Historical price
+    col_live, col_hist = st.columns(2)
+
+    # Display live-time price chart
+    with col_live:
+        st.markdown("**🕒 24-Hour Live-Time Price Data**")
+        st.line_chart(price_hist.iloc[-288:])  # Last 24 hours of live price data
+
+    # Display historical price chart
+    with col_hist:
+        st.markdown("**📈 Historical Price Dataset**")
+        st.line_chart(price_hist)  # Full historical price dataset
