@@ -255,17 +255,36 @@ with t_evolution:
             ma, ba = dm * days, db * days
             data_source = "Historical"
         
+        total_alpha = ma + ba
+        total_with_baseline = cr + total_alpha
+        pct_increase = ((total_alpha / cr) * 100) if cr > 0 else 0
+        
         ma_pct = (ma / cr * 100) if cr > 0 else 0
         ba_pct = (ba / cr * 100) if cr > 0 else 0
         
         with col:
             st.markdown(f"#### {lbl} ({data_source})")
-            st.markdown(f"**Grid Baseline**")
-            st.markdown(f"<h2 style='margin-bottom:0;'>${cr:,.0f}</h2>", unsafe_allow_html=True)
-            st.markdown(f"<p style='color:#28a745; margin-bottom:0;'>↑ ${(ma + ba):,.0f} Alpha Potential</p>", unsafe_allow_html=True)
-            st.write(f" * ⛏️ Mining: `${ma:,.0f}` ({ma_pct:+.1f}%)")
-            st.write(f" * 🔋 Battery: `${ba:,.0f}` ({ba_pct:+.1f}%)")
-            st.write("---")
+            
+            # Grid Baseline
+            st.markdown(f"**📊 Grid Baseline**")
+            st.markdown(f"<h3 style='margin-bottom:5px; color:#ffffff;'>${cr:,.0f}</h3>", unsafe_allow_html=True)
+            
+            # Alpha Increase
+            st.markdown(f"**⬆️ Alpha Increase**")
+            st.markdown(f"<h3 style='margin-bottom:5px; color:#28a745;'>${total_alpha:,.0f}</h3>", unsafe_allow_html=True)
+            
+            # Total with Alpha
+            st.markdown(f"**💰 Total**")
+            st.markdown(f"<h3 style='margin-bottom:5px; color:#0052FF;'>${total_with_baseline:,.0f}</h3>", unsafe_allow_html=True)
+            
+            # Percentage Increase
+            st.markdown(f"**📈 % Increase**")
+            st.markdown(f"<h2 style='margin-bottom:10px; color:#FFD700;'>{pct_increase:+.1f}%</h2>", unsafe_allow_html=True)
+            
+            # Breakdown
+            st.markdown(f"<hr style='margin: 8px 0;'>", unsafe_allow_html=True)
+            st.write(f"⛏️ Mining: `${ma:,.0f}` ({ma_pct:+.1f}%)")
+            st.write(f"🔋 Battery: `${ba:,.0f}` ({ba_pct:+.1f}%)")
     
     show_split(h1, "24H", 1, 101116, use_live=use_live_data)
     show_split(h2, "7D", 7, 704735, use_live=use_live_data)
