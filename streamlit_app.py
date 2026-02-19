@@ -137,16 +137,23 @@ def get_live_data():
 price_hist = get_live_data()
 breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
 
-# --- 4.5 LIVE 24H ALPHA CALCULATION ---
+# --- 4.5 LIVE PERIOD ALPHA CALCULATIONS (5-MINUTE INTERVALS) ---
 @st.cache_data(ttl=300)
-def calculate_24h_live_alpha(price_series, breakeven_val, ideal_m, ideal_b):
-    """Calculate actual mining and battery alpha from last 24 hours of live prices"""
-    if len(price_series) < 24:
+def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, days):
+    """
+    Calculate actual mining and battery alpha from live ERCOT 5-minute prices
+    ERCOT RTM prices: 12 per hour × 24 hours = 288 data points per day
+    days: number of days to analyze (1=24H, 7=7D, 30=30D, 182=6M, 365=1Y)
+    """
+    data_points_needed = days * 288
+    if len(price_series) < data_points_needed:
+        # Not enough data, return 0
         return 0, 0
-    last_24h = price_series.iloc[-24:]
-    mining_alpha_24h = sum([max(0, breakeven_val - price) * ideal_m for price in last_24h])
-    battery_alpha_24h = sum([max(0, price - breakeven_val) * ideal_b for price in last_24h])
-    return mining_alpha_24h, battery_alpha_24h
+    
+    period_data = price_series.iloc[-data_points_needed:]
+    mining_alpha = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
+    battery_alpha = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
+    return mining_alpha, battery_alpha
 
 # --- 5. DASHBOARD INTERFACE ---
 t_evolution, t_tax, t_volatility = st.tabs(["📊 Performance Evolution", "🏛️ Institutional Tax Strategy", "📈 Long-Term Volatility"])
@@ -194,10 +201,10 @@ with t_evolution:
     st.markdown("---")
     st.subheader("📅 Historical Alpha Potential (Revenue Split)")
     
-    # Toggle for historical vs live
+    # Toggle for live data
     toggle_col1, toggle_col2 = st.columns([3, 1])
     with toggle_col2:
-        use_live_data = st.toggle("Live 24H", value=False)
+        use_live_data = st.toggle("📊 Use Live Data", value=False)
     
     # Explanatory text about calculations
     with st.expander("📊 How These Calculations Work"):
@@ -212,25 +219,34 @@ with t_evolution:
           - `(0.12 capacity factor × 8760 hours × ideal_b MW × (breakeven + $30/MWh)) × solar_adjustment`
           - The `$30` represents average price premium during scarcity periods
         
-        **Live 24H Actual:**
-        - Calculates real mining/battery alpha from ERCOT prices in the last 24 hours
-        - Mining: Sum of (max(0, breakeven - price) × ideal_m) for each hour
-        - Battery: Sum of (max(0, price - breakeven) × ideal_b) for each hour
+        **Live Actual Data:**
+        - Analyzes real ERCOT RTM prices (5-minute intervals, 288 per day)
+        - **24H**: Last 288 data points (1 day)
+        - **7D**: Last 2,016 data points (7 days)
+        - **30D**: Last 8,640 data points (30 days)
+        - **6M**: Last ~43,200 data points (182 days)
+        - **1Y**: Last ~87,360 data points (365 days, if available)
+        - Mining: Sum of (max(0, breakeven - price) × ideal_m) for each interval
+        - Battery: Sum of (max(0, price - breakeven) × ideal_b) for each interval
         """)
     
     h1, h2, h3, h4, h5 = st.columns(5)
     dm, db = m_yield_yr / 365, b_yield_yr / 365
     
     def show_split(col, lbl, days, base, use_live=False):
-        sc = (total_gen / 200); cr = (base * sc) * 0.65
-        if use_live and days == 1:
-            ma, ba = calculate_24h_live_alpha(price_hist, breakeven, ideal_m, ideal_b)
+        sc = (total_gen / 200)
+        cr = (base * sc) * 0.65
+        
+        if use_live:
+            ma, ba = calculate_period_live_alpha(price_hist, breakeven, ideal_m, ideal_b, days)
             data_source = "Live"
         else:
             ma, ba = dm * days, db * days
             data_source = "Historical"
+        
         ma_pct = (ma / cr * 100) if cr > 0 else 0
         ba_pct = (ba / cr * 100) if cr > 0 else 0
+        
         with col:
             st.markdown(f"#### {lbl} ({data_source})")
             st.markdown(f"**Grid Baseline**")
@@ -240,11 +256,12 @@ with t_evolution:
             st.write(f" * 🔋 Battery: `${ba:,.0f}` ({ba_pct:+.1f}%)")
             st.write("---")
     
+    # All periods now use live data toggle
     show_split(h1, "24H", 1, 101116, use_live=use_live_data)
-    show_split(h2, "7D", 7, 704735)
-    show_split(h3, "30D", 30, 3009339)
-    show_split(h4, "6M", 182, 13159992)
-    show_split(h5, "1Y", 365, 26469998)
+    show_split(h2, "7D", 7, 704735, use_live=use_live_data)
+    show_split(h3, "30D", 30, 3009339, use_live=use_live_data)
+    show_split(h4, "6M", 182, 13159992, use_live=use_live_data)
+    show_split(h5, "1Y", 365, 26469998, use_live=use_live_data)
 
 with t_tax:
     st.subheader("🏛️ Institutional Tax Strategy")
