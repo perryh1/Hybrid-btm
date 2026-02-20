@@ -520,7 +520,7 @@ with t_volatility:
     st.dataframe(pd.DataFrame(iso_comparison), use_container_width=True)
     with t_price_dsets:
     # Add the content for the new tab
-    st.markdown("## 📊 Price Datasets")
+     st.markdown("## 📊 Price Datasets")
     st.markdown(
         """
         ### Explore Historical and 24-Hour Live-Time Price Data
