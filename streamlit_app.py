@@ -223,8 +223,7 @@ def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, d
         return 0, 0
 
 # --- 5. DASHBOARD INTERFACE ---
-t_evolution, t_tax, t_volatility, t_price_dsets = st.tabs(
-    ["📊 Performance Evolution", "🏛️ Institutional Tax Strategy", "📈 Long-Term Volatility", "📊 Price Datasets"])
+t_evolution, t_tax, t_volatility, t_price_dsets = st.tabs(["📊 Performance Evolution", "🏛️ Institutional Tax Strategy", "📈 Long-Term Volatility", "📊 Price Datasets"])
 
 with t_evolution:
     st.markdown(f"### ⚙️ Institutional Performance Summary")
