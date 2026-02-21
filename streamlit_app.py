@@ -188,39 +188,39 @@ def get_live_data():
 price_hist = get_live_data()
 breakeven = (1e6 / m_eff) * (hp_cents / 100.0) / 24.0
 
-# --- 4.5 CALCULATE FROM CACHED DATA (NO MORE API CALLS) ---
+# --- 4.5 CALCULATE FROM CACHED DATA ---
 @st.cache_data(ttl=3600)
-def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, days):
-    """Calculate mining/battery alpha from CACHED data - NO API CALLS"""
+def calculate_period_live_alpha(price_series, breakeven_val, ideal_m, ideal_b, days, w_pct, s_pct):
+    """Calculate mining/battery alpha from CACHED data, weighted by generation source"""
     try:
-        # Get last N days from cached series
         data_points_needed = days * 288
-        
         if len(price_series) < data_points_needed:
             period_data = price_series
         else:
             period_data = price_series.iloc[-data_points_needed:]
         
         if len(period_data) < 288:
-            return 0, 0
+            return 0, 0, 0
+            
+        avg_price = period_data.mean()
         
-        # Calculate sum of all 5-minute intervals
-        mining_alpha_sum = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
-        battery_alpha_sum = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
+        # Raw margin capture based on 5-min intervals
+        raw_mining = sum([max(0, breakeven_val - price) * ideal_m for price in period_data])
+        raw_battery = sum([max(0, price - breakeven_val) * ideal_b for price in period_data])
         
-        # Get actual days of data we have
         actual_days = len(period_data) / 288.0
         
-        # Convert 5-minute interval sums to daily averages
-        # Each day has 288 intervals, so divide by 288 to get per-day value
-        # Then multiply by actual_days to get total for period
-        mining_alpha = (mining_alpha_sum / 288.0) * actual_days
-        battery_alpha = (battery_alpha_sum / 288.0) * actual_days
+        # Convert to daily averages and scale to period
+        base_mining = (raw_mining / 288.0) * actual_days
+        base_battery = (raw_battery / 288.0) * actual_days
         
-        return mining_alpha, battery_alpha
-    
+        # Apply Synchronized Generation Weights
+        weighted_mining = base_mining * (1.0 + (w_pct * 0.20))
+        weighted_battery = base_battery * (1.0 + (s_pct * 0.25))
+        
+        return weighted_mining, weighted_battery, avg_price
     except:
-        return 0, 0
+        return 0, 0, 0
 
 # --- 5. DASHBOARD INTERFACE ---
 t_evolution, t_tax, t_volatility, t_price_dsets = st.tabs(
@@ -230,6 +230,11 @@ with t_evolution:
     st.markdown(f"### ⚙️ Institutional Performance Summary")
     curr_p = price_hist.iloc[-1]
     total_gen = solar_cap + wind_cap
+    
+    # Calculate generation percentages early so they can be passed to the alpha function
+    s_pct = solar_cap / total_gen if total_gen > 0 else 0.5
+    w_pct = wind_cap / total_gen if total_gen > 0 else 0.5
+    
     l1, l2, l3, l4 = st.columns(4)
     l1.metric("Market Price", f"${curr_p:.2f}")
     l2.metric("Miner Breakeven", f"${breakeven:.2f}")
@@ -245,8 +250,6 @@ with t_evolution:
 
     st.markdown("---")
     st.subheader("🎯 Optimization Engine")
-    s_pct = solar_cap / total_gen if total_gen > 0 else 0.5
-    w_pct = wind_cap / total_gen if total_gen > 0 else 0.5
     ideal_m, ideal_b = int(total_gen * ((s_pct * 0.10) + (w_pct * 0.25))), int(total_gen * ((s_pct * 0.50) + (w_pct * 0.25)))
     
     col_a, col_b = st.columns([1, 2])
@@ -278,8 +281,7 @@ with t_evolution:
         **Historical Estimate (cap_2025):**
         - `cap_2025` = Frequency of profitable mining windows in 2025
           - Sum of: Negative prices (12.1%) + $0-$0.02 prices (33.5%) = **45.6% of hours**
-        - **Mining Alpha Formula:** 
-          - `(cap_2025 × 8760 hours × ideal_m MW × (breakeven - $12/MWh)) × wind_adjustment`
+        - **Mining Alpha Formula:** - `(cap_2025 × 8760 hours × ideal_m MW × (breakeven - $12/MWh)) × wind_adjustment`
           - The `$12` represents average profit margin during low-price periods
         - **Battery Alpha Formula:**
           - `(0.12 capacity factor × 8760 hours × ideal_b MW × (breakeven + $30/MWh)) × solar_adjustment`
@@ -294,7 +296,7 @@ with t_evolution:
         - **1Y**: Last ~87,360 data points (365 days)
         - Mining: Sum of (max(0, breakeven - price) × ideal_m) for each interval
         - Battery: Sum of (max(0, price - breakeven) × ideal_b) for each interval
-        - Results are normalized by hour and scaled to period length
+        - Results are normalized by hour, scaled to period length, and weighted by generation source.
         """)
     
     h1, h2, h3, h4, h5 = st.columns(5)
@@ -305,10 +307,11 @@ with t_evolution:
         cr = (base * sc) * 0.65
         
         if use_live:
-            ma, ba = calculate_period_live_alpha(price_hist, breakeven, ideal_m, ideal_b, days)
+            ma, ba, avg_p = calculate_period_live_alpha(price_hist, breakeven, ideal_m, ideal_b, days, w_pct, s_pct)
             data_source = "Live"
         else:
             ma, ba = dm * days, db * days
+            avg_p = 0 # Historical baseline doesn't use a specific average price
             data_source = "Historical"
         
         total_alpha = ma + ba
@@ -320,6 +323,8 @@ with t_evolution:
         
         with col:
             st.markdown(f"#### {lbl} ({data_source})")
+            if use_live:
+                st.metric("Avg Grid Price", f"${avg_p:.2f}", delta=f"{avg_p - breakeven:.2f} vs Breakeven", delta_color="inverse")
             st.markdown(f"**📊 Grid Baseline**")
             st.markdown(f"<h3 style='margin-bottom:5px; color:#ffffff;'>${cr:,.0f}</h3>", unsafe_allow_html=True)
             st.markdown(f"**⬆️ Alpha Increase**")
